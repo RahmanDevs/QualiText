@@ -1,0 +1,51 @@
+{
+  "app": {
+    "name": "QualiText",
+    "tagline": "Data Quality Platform for NLP & LLM",
+    "searchPlaceholder": "Search datasets, runs, or commands (Ctrl+K)",
+    "logout": "Sign Out",
+    "themeLight": "Light Mode",
+    "themeDark": "Dark Mode",
+    "language": "Language"
+  },
+  "nav": {
+    "overview": "Overview",
+    "datasets": "Datasets",
+    "runs": "Quality Runs",
+    "explorer": "Explorer & Curation",
+    "policies": "Policies",
+    "reports": "Reports",
+    "auditLogs": "Audit Logs",
+    "settings": "Settings"
+  },
+  "auth": {
+    "title": "Sign in to QualiText",
+    "subtitle": "Use your corporate credentials or local demo account.",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Sign In",
+    "submitting": "Verifying...",
+    "errorFallback": "Sign in failed. Please check your email and password.",
+    "demoHint": "Demo account (make seed): admin@qualitext.id / Admin123!"
+  },
+  "overview": {
+    "title": "Workspace Overview",
+    "subtitle": "Monitor your NLP & LLM dataset health locally and reproducibly.",
+    "kpiDatasets": "Total Datasets",
+    "kpiAvgDqi": "Average DQI",
+    "kpiOpenPii": "Open Critical PII",
+    "kpiActiveRuns": "Active Runs",
+    "emptyTitle": "No datasets in this workspace yet",
+    "emptyDescription": "Dataset upload and quality scoring modules will be enabled in Phase 1 (Core MVP).",
+    "emptyAction": "Ready for Phase 1"
+  },
+  "states": {
+    "loading": "Loading data...",
+    "errorTitle": "Unable to load data",
+    "retry": "Retry"
+  },
+  "placeholder": {
+    "title": "Module Under Development",
+    "description": "This page is part of the Phase 0 foundation shell and will be implemented per roadmap."
+  }
+}

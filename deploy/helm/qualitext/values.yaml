@@ -1,0 +1,25 @@
+replicaCount: 1
+
+api:
+  image: qualitext/api:1.0.0
+  port: 8000
+  env:
+    APP_ENV: production
+    ALLOW_EXTERNAL_LLM: "false"
+
+worker:
+  image: qualitext/worker:1.0.0
+  concurrency: 4
+
+frontend:
+  image: qualitext/frontend:1.0.0
+  port: 80
+
+postgresql:
+  enabled: true
+
+redis:
+  enabled: true
+
+minio:
+  enabled: true

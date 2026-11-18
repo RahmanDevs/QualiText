@@ -1,0 +1,51 @@
+{
+  "app": {
+    "name": "QualiText",
+    "tagline": "Platform Data Quality untuk NLP & LLM",
+    "searchPlaceholder": "Cari dataset, run, atau perintah (Ctrl+K)",
+    "logout": "Keluar",
+    "themeLight": "Mode Terang",
+    "themeDark": "Mode Gelap",
+    "language": "Bahasa"
+  },
+  "nav": {
+    "overview": "Ringkasan",
+    "datasets": "Dataset",
+    "runs": "Run Kualitas",
+    "explorer": "Explorer & Kurasi",
+    "policies": "Kebijakan",
+    "reports": "Laporan",
+    "auditLogs": "Audit Log",
+    "settings": "Pengaturan"
+  },
+  "auth": {
+    "title": "Masuk ke QualiText",
+    "subtitle": "Gunakan akun korporat atau akun demo lokal Anda.",
+    "email": "Email",
+    "password": "Kata Sandi",
+    "submit": "Masuk",
+    "submitting": "Memverifikasi...",
+    "errorFallback": "Gagal masuk. Periksa kembali email dan kata sandi Anda.",
+    "demoHint": "Akun demo (make seed): admin@qualitext.id / Admin123!"
+  },
+  "overview": {
+    "title": "Ringkasan Workspace",
+    "subtitle": "Pantau kesehatan dataset NLP & LLM Anda secara lokal dan terukur.",
+    "kpiDatasets": "Total Dataset",
+    "kpiAvgDqi": "Rata-rata DQI",
+    "kpiOpenPii": "PII Kritis Terbuka",
+    "kpiActiveRuns": "Run Berjalan",
+    "emptyTitle": "Belum ada dataset di workspace ini",
+    "emptyDescription": "Modul unggah & penilaian dataset akan aktif pada Fase 1 (MVP Inti).",
+    "emptyAction": "Siap untuk Fase 1"
+  },
+  "states": {
+    "loading": "Memuat data...",
+    "errorTitle": "Terjadi kendala saat memuat data",
+    "retry": "Coba Lagi"
+  },
+  "placeholder": {
+    "title": "Modul dalam Pengembangan",
+    "description": "Halaman ini merupakan kerangka Fase 0 dan akan diimplementasikan sesuai roadmap."
+  }
+}
