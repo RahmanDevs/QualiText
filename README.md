@@ -2,8 +2,6 @@
 
 Platform Data Quality untuk **NLP & LLM** (Supervised Fine-Tuning, RLHF/preference, dan pipeline RAG).
 
-Lihat [CLAUDE.md](CLAUDE.md) untuk PRD, TRD, Panduan Desain, dan Roadmap lengkap.
-
 ## Quickstart (Fast Development Lokal)
 
 Prasyarat: `uv` (Python 3.12), `node` (18+), `npm`, `make`.
