@@ -45,10 +45,12 @@
 - Jangan commit secret, dataset nyata, atau file `.env`. Sediakan `.env.example`.
 - Tidak ada `print`/`console.log` tersisa; gunakan logger terstruktur (JSON).
 
-### 0.4 Perintah Standar (target; sesuaikan dengan `Makefile` yang dibuat pada Fase 0)
+### 0.4 Perintah Standar (sesuai `Makefile`)
 ```bash
 make setup        # install dependency backend + frontend
-make dev          # jalankan stack lokal (docker compose)
+make dev          # jalankan stack fast-dev lokal (API FastAPI + Frontend Vite)
+make docker-up    # jalankan stack lengkap via Docker Compose
+make docker-down  # hentikan stack Docker Compose
 make test         # test backend + frontend
 make lint         # ruff, mypy, eslint, tsc
 make migrate      # jalankan migrasi database (Alembic)
@@ -120,7 +122,7 @@ Prioritas: **P0** = wajib MVP, **P1** = wajib v1.0, **P2** = pasca v1.0.
 #### Modul A — Ingesti & Validasi Struktur
 | ID | Fitur | Prioritas |
 |---|---|---|
-| A1 | Unggah/impor JSONL, CSV, Parquet, dan teks mentah (drag-and-drop, hingga 5 GB lewat unggah *chunked*) | P0 |
+| A1 | Unggah/impor JSONL, CSV, Parquet, Markdown, PDF, dan teks mentah (drag-and-drop, hingga 5 GB lewat unggah *chunked*) | P0 |
 | A2 | Dukungan format *chat template* (`messages` dengan peran `system/user/assistant`) dan pasangan `prompt/response` | P0 |
 | A3 | *Schema & syntax checker*: JSON valid, kolom wajib ada, pasangan prompt-response lengkap, nilai kosong/rusak | P0 |
 | A4 | Pemetaan kolom (*column mapping*) untuk skema kustom | P0 |
@@ -396,17 +398,20 @@ Aturan modul:
 |---|---|
 | `organizations`, `workspaces` | id, nama, pengaturan |
 | `users`, `memberships` | id, email, peran per workspace |
-| `datasets` | id, workspace_id, nama, deskripsi, tipe (sft / preference / rag / raw), dibuat_oleh |
+| `datasets` | id, workspace_id, nama, deskripsi, tipe (sft / preference / rag / raw), `retention_days`, dibuat_oleh |
 | `dataset_versions` | id, dataset_id, nomor_versi, parent_version_id, uri_storage (Parquet), jumlah_baris, checksum, status |
 | `column_mappings` | version_id, peta kolom → peran (prompt/response/messages/…) |
 | `quality_runs` | id, version_id, config_snapshot (JSONB), seed, status, mulai/selesai, dqi_total |
 | `run_module_results` | run_id, module, dimension, version_modul, metrics (JSONB), findings_count |
-| `row_findings` | run_id, row_id, module, code, severity, score, span, detail (JSONB) — dipartisi per run |
+| `row_findings` | run_id, row_id, module, code, severity, score, span, detail (JSONB) — dipartisi HASH (16 partisi) per `run_id` pada PostgreSQL (migrasi `0003`) |
 | `curation_actions` | id, version_id, row_id, aksi (approve/reject/flag/edit), nilai_lama/baru (terenkripsi bila PII), user_id, waktu |
 | `quality_policies` | id, workspace_id, aturan ambang batas (JSONB), aktif |
 | `exports` | id, version_id, format, filter, uri, manifest (JSONB), user_id |
 | `audit_logs` | id, waktu, user_id, aksi, objek, ip, metadata — **append-only** |
 | `api_tokens` | id, user_id, hash, scope, kedaluwarsa |
+| `refresh_token_sessions` | id, user_id, `token_jti`, `family_id`, `expires_at`, `is_revoked`, `replaced_by_jti` (rotasi refresh token + deteksi reuse) |
+| `webhook_subscriptions`, `webhook_deliveries` | id, workspace_id, nama, url, `signing_secret`, events, `is_active` & log pengiriman HMAC-SHA256 |
+| `benchmark_sets` | id, workspace_id, nama, `entry_count`, `prompts_json`, `storage_uri`, `is_active` (deteksi kontaminasi C5) |
 
 Catatan:
 - Data baris dataset disimpan di **Parquet** pada object storage, bukan di PostgreSQL. Tabel `row_findings` menyimpan temuan, bukan teks asli.
@@ -451,20 +456,23 @@ Konvensi: JSON, `snake_case`, paginasi berbasis kursor, kode error terstandar (`
 
 | Endpoint (ringkas) | Fungsi |
 |---|---|
-| `POST /auth/login`, `GET /auth/me` | Autentikasi (OIDC callback pada v1) |
-| `POST /workspaces/{id}/datasets` | Buat dataset |
-| `POST /datasets/{id}/versions/uploads` (+ `…/complete`) | Unggah chunked |
+| `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`, `GET /auth/sso/providers`, `/auth/oidc/*`, `/auth/saml/*` | Autentikasi, rotasi refresh token, dan Enterprise SSO (OIDC/SAML 2.0) |
+| `GET /workspaces/{id}/overview`, `GET/PUT /workspaces/{id}/retention`, `POST .../retention/purge` | Ringkasan KPI & kebijakan retensi UU PDP |
+| `POST /workspaces/{id}/datasets`, `DELETE /datasets/{id}` | Buat dataset & hak hapus UU PDP |
+| `POST /datasets/{id}/versions/uploads` (+ `…/complete`), `POST .../versions/import-connector`, `GET /versions/{id}/validation-errors` | Unggah chunked, impor konektor admin, laporan error validasi |
 | `GET/PUT /versions/{id}/mapping` | Pemetaan kolom |
 | `POST /versions/{id}/runs` | Mulai run kualitas (modul + config) |
 | `GET /runs/{id}`, `GET /runs/{id}/events` (SSE) | Status dan progres |
-| `GET /runs/{id}/summary` | DQI, skor dimensi, metrik |
+| `GET /runs/{id}/summary`, `GET /runs/{id}/report.html`, `GET /runs/{id}/report.pdf`, `GET /datasets/{id}/dqi-trend` | DQI, skor dimensi, metrik, laporan kualitas & tren DQI |
 | `GET /runs/{id}/findings` | Temuan per baris (filter, sort, kursor) |
 | `GET /versions/{id}/rows` | Baris dataset (server-side paging/filter) |
-| `POST /versions/{id}/curation` | Aksi kurasi (batch) → versi baru |
+| `GET /versions/{id}/dedup-preview`, `GET /versions/{id}/topic-clusters`, `GET /versions/{id}/compare/{other_id}` | Pratinjau dedup semantik, klaster 2D, dan perbandingan versi |
+| `POST /curation/diff-preview`, `POST /curation/ai-repair-preview`, `POST /versions/{id}/curation` | Pratinjau diff transformasi, perbaikan teks lokal & aksi kurasi (batch) → versi baru |
 | `GET/PUT /workspaces/{id}/policy` | Kebijakan kualitas |
 | `POST /versions/{id}/exports`, `GET /exports/{id}` | Ekspor dan unduhan |
 | `GET /audit-logs` | Audit log (izin Governance/Admin) |
-| `POST /api-tokens` | Token API untuk integrasi |
+| `POST /api-tokens`, `GET/POST/DELETE /workspaces/{id}/webhooks*`, `GET/POST/DELETE /workspaces/{id}/benchmarks*` | Token API integrasi, manajemen webhook HMAC & set benchmark |
+| `GET /healthz`, `GET /readyz`, `GET /metrics` | Probe liveness/readiness & metrik Prometheus |
 
 ### 2.9 Keamanan
 
@@ -500,19 +508,20 @@ Konvensi: JSON, `snake_case`, paginasi berbasis kursor, kode error terstandar (`
 Data uji **wajib sintetis**; dilarang memasukkan data korporat nyata ke repositori.
 
 ### 2.12 Deployment dan Operasional
-- **Dev:** `docker compose up` (api, worker, redis, postgres, minio, frontend, opsional model server).
+- **Dev:** `make dev` untuk mode *fast-dev* lokal (SQLite async + local storage + Celery *eager*) dan `docker compose up` untuk stack penuh (`api`, `worker`, `redis`, `postgres` + `pgvector`, `minio`, `frontend`, opsional model server).
 - **Produksi v1:** Docker Compose (hardened) atau Kubernetes (Helm) dengan autoscaling worker; model server terpisah (GPU node).
 - **Konfigurasi:** 12-factor via environment; semua opsi eksternal (mis. LLM API eksternal) **nonaktif secara default**.
 - **Backup:** snapshot PostgreSQL terjadwal dan replikasi/versioning storage.
 - **Monitoring:** dashboard Grafana (latensi API, antrean, durasi run, tingkat gagal), alert untuk job macet.
-- **Migrasi:** Alembic, bersifat *forward-compatible*; tidak ada perubahan skema tanpa migrasi.
+- **Migrasi:** Alembic, bersifat *forward-compatible*; tidak ada perubahan skema tanpa migrasi. Pada PostgreSQL, `ensure_postgres_version_column_width` (`backend/app/db/session.py` + `backend/alembic/env.py`) otomatis memperlebar `alembic_version.version_num` menjadi `VARCHAR(128)` agar revisi >32 karakter (`0003`–`0005`) tidak terpotong, dan migrasi `0003` me-rename constraint `row_findings_pkey` sebelum membuat tabel partisi HASH baru.
+- **Penanganan Error & CORS:** handler error `500` (`backend/app/core/errors.py`) mencatat exception secara terstruktur tanpa PII dan mempertahankan header CORS untuk `CORS_ORIGINS` (`http://localhost:5173`, `http://127.0.0.1:5173`).
 
-### 2.13 Keputusan Terbuka (isi saat Fase 0)
-- Model embedding multibahasa final dan hasil evaluasi pada data Bahasa Indonesia.
-- Model LLM-judge lokal dan kebutuhan GPU.
-- Pilihan vector store untuk skala produksi (pgvector vs Qdrant).
-- Penyedia SSO target (Keycloak / Azure AD / lainnya).
-- Kebijakan retensi default.
+### 2.13 Keputusan Arsitektur (Diperbarui dari Keputusan Terbuka Fase 0)
+- **Model embedding multibahasa:** Default `intfloat/multilingual-e5-small` (hook `sentence-transformers`, dengan fallback deterministik `local_hash` + SimHash LSH untuk dev/CI offline; benchmark sintetis pada `docs/benchmarks.md` mencatat Precision `1.0000` dan Recall `1.0000`).
+- **Model LLM-judge lokal & GPU:** Default `ALLOW_EXTERNAL_LLM=false` dan `LLM_PROVIDER=placeholder`; mode aktif kompatibel OpenAI diarahkan ke loopback lokal (`http://localhost:11434/v1` Ollama/vLLM, divalidasi oleh `is_local_llm_url`). Kebutuhan GPU klaster mengikuti spesifikasi referensi 2.10.
+- **Vector store produksi:** `pgvector` di PostgreSQL 16 (atau `faiss` lokal/hybrid) melalui `VECTOR_INDEX_BACKEND=auto|bruteforce|lsh|faiss|pgvector`; Qdrant dievaluasi terpisah bila skala melebihi jutaan vektor.
+- **Penyedia SSO target:** Protokol terbuka **OIDC** (JWKS/HS256 — kompatibel Keycloak, Microsoft Entra ID/Azure AD, Okta) dan **SAML 2.0** (SP metadata + ACS HMAC + proteksi anti-XXE), nonaktif secara default (`OIDC_ENABLED=false`, `SAML_ENABLED=false`).
+- **Kebijakan retensi default:** Dikonfigurasi per workspace (`default_retention_days` lewat `/workspaces/{id}/retention`, default nonaktif/`None` hingga diaktifkan admin) dan per dataset (`datasets.retention_days`, contoh seed `90` hari), didukung hak hapus UU PDP (`DELETE /datasets/{id}`) serta pembersihan manual (`POST .../retention/purge`).
 
 ---
 
@@ -556,7 +565,7 @@ Aturan kontras: teks biasa ≥ 4,5:1, teks besar dan komponen UI ≥ 3:1. Status
 `90–100` hijau (Siap Latih) · `75–89` biru (Baik) · `60–74` oranye (Perlu Perbaikan) · `<60` merah (Berisiko).
 
 **Tipografi**
-- UI: **Inter** (fallback: system-ui). Kode/ID/teks dataset mentah: **JetBrains Mono**.
+- UI: **Inter** (fallback: system-ui). Kode/ID/teks dataset mentah: **JetBrains Mono**. Font menggunakan stack lokal/*system* agar kompatibel *air-gapped* tanpa ketergantungan CDN Google Fonts eksternal.
 - Skala: 12 / 13 / 14 (body default) / 16 / 20 / 24 / 30 / 36 px.
 - Bobot: 400 (body), 500 (label/tombol), 600 (judul), 700 (angka KPI).
 - Line-height: 1,5 untuk teks, 1,25 untuk judul. Gunakan *tabular numbers* untuk kolom angka.
@@ -572,7 +581,7 @@ Aturan kontras: teks biasa ≥ 4,5:1, teks besar dan komponen UI ≥ 3:1. Status
 
 ### 3.3 Layout dan Navigasi
 - **App shell:** sidebar kiri (navigasi utama), top bar (pemilih workspace, pencarian global `⌘/Ctrl+K`, notifikasi, profil), area konten.
-- **Navigasi utama:** Ringkasan · Dataset · Run Kualitas · Explorer & Kurasi · Kebijakan · Laporan · Audit Log · Pengaturan.
+- **Navigasi utama:** Ringkasan · Dataset · Run Kualitas · Explorer & Kurasi · Tinjau Duplikat · Kebijakan · Laporan · Audit Log · Pengaturan.
 - **Breadcrumb** pada halaman bertingkat (Workspace › Dataset › Versi › Run).
 - Mode terang dan gelap; ikuti preferensi sistem, dapat diganti manual.
 - Responsif: dioptimalkan desktop (≥ 1280 px), tetap dapat dipakai pada tablet; mobile hanya baca (*read-only*) untuk ringkasan.
@@ -631,6 +640,8 @@ Spesifik domain:
 ## 4. Roadmap dan Fase Pengerjaan
 
 > Estimasi bersifat indikatif; sesuaikan dengan ukuran tim. Setiap fase harus memenuhi Definition of Done (0.5) sebelum lanjut.
+>
+> **Status Terkini:** Fase 0–3 (cakupan aplikasi P0, P1, dan P2) berstatus **`SELESAI`** pada tingkat kode aplikasi (rincian verifikasi di `docs/progress.md` dan `REPORT.md`), sedangkan validasi beban klaster produksi live, aktivasi model neural GPU, dan peningkatan lanjutan Tahap 5+ dicatat pada `REPORT.md` Bagian 6.
 
 ### Fase 0 — Fondasi (±1–2 minggu)
 - Inisialisasi monorepo, `Makefile`, Docker Compose (api, worker, postgres, redis, minio, frontend).

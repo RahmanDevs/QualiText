@@ -30,6 +30,7 @@ frontend/.vite/
 frontend/coverage/
 playwright-report/
 test-results/
+*.tsbuildinfo
 
 # OS / Editor
 .DS_Store

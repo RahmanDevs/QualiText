@@ -26,7 +26,12 @@ export async function apiFetch<T>(
   accessToken?: string | null,
 ): Promise<T> {
   const headers = new Headers(options.headers);
-  if (!headers.has('Content-Type') && options.body) {
+  if (
+    !headers.has('Content-Type') &&
+    options.body &&
+    !(options.body instanceof FormData) &&
+    !(options.body instanceof Blob)
+  ) {
     headers.set('Content-Type', 'application/json');
   }
   if (accessToken) {
@@ -51,6 +56,10 @@ export async function apiFetch<T>(
       // Ignore non-JSON error body
     }
     throw new ApiError(code, message, response.status);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
   }
 
   return (await response.json()) as T;

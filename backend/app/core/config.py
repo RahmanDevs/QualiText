@@ -3,8 +3,10 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_INSECURE_SECRET_KEY = "dev-only-insecure-secret-key-change-me-in-production"
 
 
 class Settings(BaseSettings):
@@ -24,13 +26,38 @@ class Settings(BaseSettings):
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
+    )
 
     # Security & Auth
-    secret_key: str = "dev-only-insecure-secret-key-change-me-in-production"
+    secret_key: str = DEFAULT_INSECURE_SECRET_KEY
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
     jwt_algorithm: str = "HS256"
+    login_rate_limit_max_attempts: int = 10
+    login_rate_limit_window_seconds: int = 60
+
+    # Enterprise SSO (OIDC / SAML) - opt-in
+    oidc_enabled: bool = False
+    oidc_provider_name: str = "Corporate SSO"
+    oidc_issuer_url: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_redirect_uri: str = "http://localhost:5173/auth/sso/callback"
+    oidc_jwks_json: str = ""
+    oidc_hs256_secret: str = ""
+    oidc_default_workspace_slug: str = "tim-nlp-inti"
+
+    saml_enabled: bool = False
+    saml_idp_sso_url: str = ""
+    saml_entity_id: str = "qualitext-sp"
+    saml_acs_url: str = "http://localhost:8000/api/v1/auth/saml/acs"
+    saml_shared_secret: str = ""
+
+    # Webhooks
+    webhook_timeout_seconds: float = 5.0
+    webhook_allow_private_targets: bool = False
 
     # Database (SQLite async for fast-dev, PostgreSQL+asyncpg for Docker/prod)
     database_url: str = "sqlite+aiosqlite:///./qualitext_dev.db"
@@ -50,9 +77,14 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/1"
 
-    # Open-source embedding model (evaluated in Fase 0/1)
+    # Open-source embedding model & vector index backend
     embedding_model_name: str = "intfloat/multilingual-e5-small"
     embedding_device: str = "cpu"
+    embedding_backend: Literal["auto", "local_hash", "sentence_transformers"] = "auto"
+    vector_index_backend: Literal["auto", "bruteforce", "lsh", "faiss", "pgvector"] = "auto"
+
+    # Observability
+    otel_service_name: str = "qualitext-api"
 
     # LLM-as-a-judge placeholder (external LLM disabled by default per CLAUDE.md 0.1 #3)
     allow_external_llm: bool = False
@@ -60,6 +92,17 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:11434/v1"
     llm_api_key: str = ""
     llm_model: str = ""
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        """Reject insecure default secret keys when running in production."""
+        if self.app_env == "production" and (
+            self.secret_key == DEFAULT_INSECURE_SECRET_KEY or len(self.secret_key) < 32
+        ):
+            raise ValueError(
+                "SECRET_KEY must be configured with a strong secret (>= 32 chars) in production."
+            )
+        return self
 
 
 @lru_cache

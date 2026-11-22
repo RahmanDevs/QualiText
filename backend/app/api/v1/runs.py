@@ -1,25 +1,37 @@
 """Quality run endpoints (`/api/v1/versions/{id}/runs`, `/api/v1/runs/{id}`)."""
 
+import asyncio
+import io
 import json
+import re
+import time
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, Depends, Query, status
+import polars as pl
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.datasets import _ensure_dataset_access
+from app.core.config import get_settings
 from app.core.deps import get_current_user
 from app.core.security import Permission
 from app.db.models import DatasetVersion, QualityRun, RowFindingRecord, RunModuleResult, User
-from app.db.session import get_db
+from app.db.session import AsyncSessionLocal, get_db
+from app.modules.cleaning.pii import apply_pii_transform
+from app.modules.semantic.clustering import compute_topic_clusters
+from app.modules.semantic.semantic_dedup import compute_dedup_groups
 from app.schemas.runs import (
     RowFindingResponse,
     RunCreateRequest,
     RunResponse,
     RunSummaryResponse,
 )
-from app.services import dataset_service, run_service
+from app.services import dataset_service, report_service, run_service
+from app.services.audit_service import extract_client_ip
+from app.workers.tasks import RUN_PROGRESS_CHANNEL_PREFIX
 
 router = APIRouter(tags=["runs"])
 
@@ -71,6 +83,7 @@ async def list_version_runs(
 async def start_quality_run(
     version_id: str,
     payload: RunCreateRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RunResponse:
@@ -84,6 +97,7 @@ async def start_quality_run(
         seed=payload.seed,
         params=payload.params,
         user_id=user.id,
+        ip_address=extract_client_ip(request),
     )
     return _to_run_response(run)
 
@@ -113,14 +127,89 @@ async def stream_run_events(
     await _ensure_dataset_access(db, user, ver.dataset_id, Permission.DATASET_READ)
 
     async def _event_stream() -> AsyncGenerator[str, None]:
-        payload = {
+        initial = {
             "run_id": run.id,
             "status": run.status,
             "current_stage": run.current_stage,
             "progress_pct": run.progress_pct,
             "dqi_total": run.dqi_total,
         }
-        yield f"data: {json.dumps(payload)}\n\n"
+        yield f"data: {json.dumps(initial)}\n\n"
+        if run.status in {"completed", "failed"}:
+            return
+
+        settings = get_settings()
+        channel = f"{RUN_PROGRESS_CHANNEL_PREFIX}{run.id}"
+        deadline = time.monotonic() + 60.0
+
+        try:
+            client = aioredis.from_url(settings.redis_url, decode_responses=True)
+            pubsub = client.pubsub()
+            try:
+                await pubsub.subscribe(channel)
+                async with AsyncSessionLocal() as check_db:
+                    latest = (
+                        await check_db.execute(select(QualityRun).where(QualityRun.id == run.id))
+                    ).scalar_one_or_none()
+                    if latest is not None and (
+                        latest.status in {"completed", "failed"}
+                        or latest.progress_pct != run.progress_pct
+                        or latest.current_stage != run.current_stage
+                    ):
+                        snap = {
+                            "run_id": latest.id,
+                            "status": latest.status,
+                            "current_stage": latest.current_stage,
+                            "progress_pct": latest.progress_pct,
+                            "dqi_total": latest.dqi_total,
+                        }
+                        yield f"data: {json.dumps(snap)}\n\n"
+                        if latest.status in {"completed", "failed"}:
+                            return
+                while time.monotonic() < deadline:
+                    msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    if msg and isinstance(msg.get("data"), str):
+                        raw_data = msg["data"]
+                        yield f"data: {raw_data}\n\n"
+                        try:
+                            parsed = json.loads(raw_data)
+                            if parsed.get("status") in {"completed", "failed"}:
+                                return
+                        except json.JSONDecodeError:
+                            pass
+            finally:
+                await pubsub.unsubscribe(channel)
+                await pubsub.aclose()
+                await client.aclose()
+        except Exception:
+            poll_deadline = time.monotonic() + 30.0
+            last_pct = run.progress_pct
+            last_stage = run.current_stage
+            while time.monotonic() < poll_deadline:
+                await asyncio.sleep(0.5)
+                db.expire_all()
+                current = (
+                    await db.execute(select(QualityRun).where(QualityRun.id == run_id))
+                ).scalar_one_or_none()
+                if current is None:
+                    return
+                if (
+                    current.progress_pct != last_pct
+                    or current.current_stage != last_stage
+                    or current.status in {"completed", "failed"}
+                ):
+                    last_pct = current.progress_pct
+                    last_stage = current.current_stage
+                    payload = {
+                        "run_id": current.id,
+                        "status": current.status,
+                        "current_stage": current.current_stage,
+                        "progress_pct": current.progress_pct,
+                        "dqi_total": current.dqi_total,
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    if current.status in {"completed", "failed"}:
+                        return
 
     return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
@@ -215,41 +304,105 @@ async def download_html_report(
         .scalars()
         .all()
     )
-    dims = run.dqi_summary.get("dimensions", [])
-    dim_rows = "".join(
-        f"<tr><td>{d['label']}</td><td>{d['score']}</td>"
-        f"<td>{round(d['weight'] * 100)}%</td><td>{d['findings_count']}</td></tr>"
-        for d in dims
+    safe_run_id = re.sub(r"[^A-Za-z0-9_-]", "", run.id)
+    html_doc = report_service.render_html_report(run, list(mod_results))
+    disposition = f'attachment; filename="qualitext_report_{safe_run_id}.html"'
+    return HTMLResponse(content=html_doc, headers={"Content-Disposition": disposition})
+
+
+@router.get("/runs/{run_id}/report.pdf")
+async def download_pdf_report(
+    run_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Generate a downloadable PDF 1.4 quality summary report (Module F6)."""
+    run = await run_service.get_run_or_404(db, run_id)
+    ver = await dataset_service.get_version_or_404(db, run.version_id)
+    await _ensure_dataset_access(db, user, ver.dataset_id, Permission.DATASET_READ)
+
+    mod_results = (
+        (await db.execute(select(RunModuleResult).where(RunModuleResult.run_id == run_id)))
+        .scalars()
+        .all()
     )
-    mod_rows = "".join(
-        f"<tr><td>{m.module}</td><td>{m.dimension}</td>"
-        f"<td>{m.findings_count}</td><td><code>{json.dumps(m.metrics)}</code></td></tr>"
-        for m in mod_results
+    safe_run_id = re.sub(r"[^A-Za-z0-9_-]", "", run.id)
+    pdf_bytes = report_service.render_pdf_report(run, list(mod_results))
+    disposition = f'attachment; filename="qualitext_report_{safe_run_id}.pdf"'
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": disposition},
     )
-    html_doc = f"""<!doctype html>
-<html lang="id">
-<head><meta charset="utf-8"><title>QualiText Report — {run.id}</title>
-<style>
-body{{font-family:Inter,system-ui,sans-serif;max-width:900px;margin:40px auto;color:#0f172a;}}
-table{{width:100%;border-collapse:collapse;margin:16px 0;}}
-th,td{{border:1px solid #e2e8f0;padding:8px 12px;text-align:left;font-size:13px;}}
-th{{background:#f1f5f9;}}
-</style></head>
-<body>
-<h1>Laporan Kualitas Dataset — QualiText</h1>
-<p><strong>Run ID:</strong> {run.id} | <strong>DQI Total:</strong> {run.dqi_total} / 100
- ({run.dqi_summary.get("status_label", "")})</p>
-<h2>Rincian Dimensi</h2>
-<table><thead><tr><th>Dimensi</th><th>Skor</th><th>Bobot</th><th>Temuan</th></tr></thead>
-<tbody>{dim_rows}</tbody></table>
-<h2>Hasil Modul</h2>
-<table><thead><tr><th>Modul</th><th>Dimensi</th><th>Temuan</th><th>Metrik</th></tr></thead>
-<tbody>{mod_rows}</tbody></table>
-</body></html>"""
-    return HTMLResponse(
-        content=html_doc,
-        headers={"Content-Disposition": f'attachment; filename="qualitext_report_{run.id}.html"'},
-    )
+
+
+@router.get("/versions/{version_id}/dedup-preview")
+async def preview_semantic_dedup(
+    version_id: str,
+    threshold: float = Query(default=0.88, ge=0.5, le=0.99),
+    max_rows: int = Query(default=500, ge=2, le=2000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Preview semantic duplicate groups at an interactive threshold without re-running (US-5)."""
+    ver = await dataset_service.get_version_or_404(db, version_id)
+    ds = await _ensure_dataset_access(db, user, ver.dataset_id, Permission.DATASET_READ)
+    pq_bytes = dataset_service.load_version_parquet_bytes(ds.id, ver.version_number)
+    df = pl.read_parquet(io.BytesIO(pq_bytes)).select(["row_id", "text"]).slice(0, max_rows)
+
+    row_ids = [str(r["row_id"]) for r in df.iter_rows(named=True)]
+    texts = [str(r.get("text") or "") for r in df.iter_rows(named=True)]
+    groups, backend, hit_ratio = compute_dedup_groups(row_ids, texts, threshold=threshold)
+
+    preview_by_rid = {
+        rid: apply_pii_transform(txt, mode="mask")[:180]
+        for rid, txt in zip(row_ids, texts, strict=True)
+    }
+    for grp in groups:
+        for member in grp["members"]:
+            member["text_preview"] = preview_by_rid.get(str(member["row_id"]), "")
+
+    duplicate_rows = sum(max(0, len(g["members"]) - 1) for g in groups)
+    return {
+        "version_id": ver.id,
+        "threshold": threshold,
+        "scanned_rows": len(row_ids),
+        "duplicate_groups_count": len(groups),
+        "duplicate_rows_count": duplicate_rows,
+        "embedding_backend": backend,
+        "cache_hit_ratio": hit_ratio,
+        "groups": groups,
+    }
+
+
+@router.get("/versions/{version_id}/topic-clusters")
+async def get_topic_clusters(
+    version_id: str,
+    num_clusters: int = Query(default=5, ge=2, le=12),
+    seed: int = Query(default=42, ge=0),
+    max_rows: int = Query(default=300, ge=2, le=1000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Compute 2D projected topic cluster scatter data with PII masked in previews (C3)."""
+    ver = await dataset_service.get_version_or_404(db, version_id)
+    ds = await _ensure_dataset_access(db, user, ver.dataset_id, Permission.DATASET_READ)
+    pq_bytes = dataset_service.load_version_parquet_bytes(ds.id, ver.version_number)
+    df = pl.read_parquet(io.BytesIO(pq_bytes)).select(["row_id", "text"]).slice(0, max_rows)
+
+    row_ids = [str(r["row_id"]) for r in df.iter_rows(named=True)]
+    masked_texts = [
+        apply_pii_transform(str(r.get("text") or ""), mode="mask") for r in df.iter_rows(named=True)
+    ]
+    clustered = compute_topic_clusters(row_ids, masked_texts, num_clusters=num_clusters, seed=seed)
+    return {
+        "version_id": ver.id,
+        "scanned_rows": len(row_ids),
+        "entropy": clustered["entropy"],
+        "embedding_backend": clustered["embedding_backend"],
+        "clusters": clustered["clusters"],
+        "points": clustered["points"],
+    }
 
 
 @router.get("/datasets/{dataset_id}/dqi-trend")

@@ -35,8 +35,17 @@ async def list_version_rows(
     search: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    ip_address: str | None = None,
 ) -> PaginatedRowsResponse:
     """Read Parquet rows with server-side filtering, pagination, and PII masking."""
+    should_reveal = reveal_pii and can_view_pii
+    if reveal_pii and not can_view_pii:
+        raise AppError(
+            code="FORBIDDEN_PII_VIEW",
+            message="Anda tidak memiliki izin `pii:view` untuk membuka teks PII asli.",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
     ver = await get_version_or_404(db, version_id)
     ds = await get_dataset_or_404(db, ver.dataset_id)
     pq_bytes = load_version_parquet_bytes(ds.id, ver.version_number)
@@ -46,24 +55,14 @@ async def list_version_rows(
         df = df.filter(pl.col("curation_status") == curation_status)
     if only_invalid:
         df = df.filter(~pl.col("is_valid"))
-    if search:
-        needle = search.lower()
-        df = df.filter(
-            pl.col("text").str.to_lowercase().str.contains(needle, literal=True)
-            | pl.col("row_id").str.to_lowercase().str.contains(needle, literal=True)
-        )
 
-    total = df.height
-    page_df = df.slice(offset, limit)
-
-    should_reveal = reveal_pii and can_view_pii
-    if reveal_pii and not can_view_pii:
-        raise AppError(
-            code="FORBIDDEN_PII_VIEW",
-            message="Anda tidak memiliki izin `pii:view` untuk membuka teks PII asli.",
-            status_code=status.HTTP_403_FORBIDDEN,
-        )
     if should_reveal:
+        if search:
+            needle = search.lower()
+            df = df.filter(
+                pl.col("text").str.to_lowercase().str.contains(needle, literal=True)
+                | pl.col("row_id").str.to_lowercase().str.contains(needle, literal=True)
+            )
         await record_audit_log(
             db,
             action="pii.reveal",
@@ -71,35 +70,80 @@ async def list_version_rows(
             target_id=ver.id,
             user_id=user_id,
             workspace_id=ds.workspace_id,
+            ip_address=ip_address,
             metadata={"offset": offset, "limit": limit},
         )
         await db.commit()
 
     items: list[RowItemResponse] = []
-    for row in page_df.iter_rows(named=True):
-        prompt = str(row.get("prompt") or "")
-        response = str(row.get("response") or "")
-        text = str(row.get("text") or "")
-        has_pii = bool(detect_pii_spans(text))
-
-        if has_pii and not should_reveal:
-            prompt = apply_pii_transform(prompt, mode="mask")
-            response = apply_pii_transform(response, mode="mask")
-            text = apply_pii_transform(text, mode="mask")
-
-        items.append(
-            RowItemResponse(
-                row_id=str(row["row_id"]),
-                line_number=int(row["line_number"]),
-                prompt=prompt,
-                response=response,
-                text=text,
-                is_valid=bool(row["is_valid"]),
-                validation_error=str(row.get("validation_error") or ""),
-                curation_status=str(row.get("curation_status") or "pending"),
-                has_pii=has_pii,
+    if search and not should_reveal:
+        needle = search.lower()
+        matched: list[RowItemResponse] = []
+        for row in df.iter_rows(named=True):
+            raw_prompt = str(row.get("prompt") or "")
+            raw_response = str(row.get("response") or "")
+            raw_text = str(row.get("text") or "")
+            row_id_val = str(row["row_id"])
+            has_pii = bool(
+                detect_pii_spans(raw_text)
+                or detect_pii_spans(raw_prompt)
+                or detect_pii_spans(raw_response)
             )
-        )
+            disp_prompt = apply_pii_transform(raw_prompt, mode="mask") if has_pii else raw_prompt
+            disp_response = (
+                apply_pii_transform(raw_response, mode="mask") if has_pii else raw_response
+            )
+            disp_text = apply_pii_transform(raw_text, mode="mask") if has_pii else raw_text
+            if (
+                needle in disp_text.lower()
+                or needle in disp_prompt.lower()
+                or needle in disp_response.lower()
+                or needle in row_id_val.lower()
+            ):
+                matched.append(
+                    RowItemResponse(
+                        row_id=row_id_val,
+                        line_number=int(row["line_number"]),
+                        prompt=disp_prompt,
+                        response=disp_response,
+                        text=disp_text,
+                        is_valid=bool(row["is_valid"]),
+                        validation_error=str(row.get("validation_error") or ""),
+                        curation_status=str(row.get("curation_status") or "pending"),
+                        has_pii=has_pii,
+                    )
+                )
+        total = len(matched)
+        items = matched[offset : offset + limit]
+    else:
+        total = df.height
+        page_df = df.slice(offset, limit)
+        for row in page_df.iter_rows(named=True):
+            prompt = str(row.get("prompt") or "")
+            response = str(row.get("response") or "")
+            text = str(row.get("text") or "")
+            has_pii = bool(
+                detect_pii_spans(text) or detect_pii_spans(prompt) or detect_pii_spans(response)
+            )
+
+            if has_pii and not should_reveal:
+                prompt = apply_pii_transform(prompt, mode="mask")
+                response = apply_pii_transform(response, mode="mask")
+                text = apply_pii_transform(text, mode="mask")
+
+            items.append(
+                RowItemResponse(
+                    row_id=str(row["row_id"]),
+                    line_number=int(row["line_number"]),
+                    prompt=prompt,
+                    response=response,
+                    text=text,
+                    is_valid=bool(row["is_valid"]),
+                    validation_error=str(row.get("validation_error") or ""),
+                    curation_status=str(row.get("curation_status") or "pending"),
+                    has_pii=has_pii,
+                )
+            )
 
     return PaginatedRowsResponse(
         version_id=ver.id,
@@ -119,12 +163,29 @@ def preview_text_diff(text: str, *, pii_mode: str, clean_artifacts: bool) -> tup
     return text, after
 
 
+def _build_redacted_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a curation audit snapshot with detected PII masked before DB persistence."""
+    prompt_raw = str(row.get("prompt") or "")
+    response_raw = str(row.get("response") or "")
+    text_raw = str(row.get("text") or "")
+    has_pii = bool(
+        detect_pii_spans(prompt_raw) or detect_pii_spans(response_raw) or detect_pii_spans(text_raw)
+    )
+    return {
+        "prompt": apply_pii_transform(prompt_raw, mode="mask") if has_pii else prompt_raw,
+        "response": apply_pii_transform(response_raw, mode="mask") if has_pii else response_raw,
+        "curation_status": str(row.get("curation_status") or ""),
+        "pii_redacted": has_pii,
+    }
+
+
 async def apply_curation_batch(
     db: AsyncSession,
     *,
     version_id: str,
     actions: list[CurationActionItem],
     user_id: str,
+    ip_address: str | None = None,
 ) -> DatasetVersion:
     """Apply curation actions and create a new immutable DatasetVersion."""
     ver = await get_version_or_404(db, version_id)
@@ -134,6 +195,7 @@ async def apply_curation_batch(
 
     action_map = {item.row_id: item for item in actions}
     updated_rows: list[dict[str, Any]] = []
+    pending_actions: list[CurationAction] = []
 
     for row in df.iter_rows(named=True):
         rid = str(row["row_id"])
@@ -142,12 +204,26 @@ async def apply_curation_batch(
             updated_rows.append(dict(row))
             continue
 
-        old_snapshot = {
-            "prompt": row["prompt"],
-            "response": row["response"],
-            "curation_status": row["curation_status"],
-        }
-        new_row = dict(row)
+        row_dict = dict(row)
+        old_snapshot = _build_redacted_snapshot(row_dict)
+        new_row = dict(row_dict)
+
+        if act.action == "drop_row":
+            pending_actions.append(
+                CurationAction(
+                    version_id=ver.id,
+                    row_id=rid,
+                    action=act.action,
+                    old_value=old_snapshot,
+                    new_value={
+                        "curation_status": "dropped",
+                        "dropped": True,
+                        "pii_redacted": old_snapshot["pii_redacted"],
+                    },
+                    user_id=user_id,
+                )
+            )
+            continue
 
         if act.action == "approve":
             new_row["curation_status"] = "approved"
@@ -155,10 +231,11 @@ async def apply_curation_batch(
             new_row["curation_status"] = "rejected"
         elif act.action == "flag":
             new_row["curation_status"] = "flagged"
-        elif act.action == "mask_pii":
-            new_row["prompt"] = apply_pii_transform(str(row["prompt"] or ""), mode="mask")
-            new_row["response"] = apply_pii_transform(str(row["response"] or ""), mode="mask")
-            new_row["text"] = apply_pii_transform(str(row["text"] or ""), mode="mask")
+        elif act.action in {"mask_pii", "hash_pii"}:
+            pii_mode = "hash" if act.action == "hash_pii" else "mask"
+            new_row["prompt"] = apply_pii_transform(str(row["prompt"] or ""), mode=pii_mode)
+            new_row["response"] = apply_pii_transform(str(row["response"] or ""), mode=pii_mode)
+            new_row["text"] = apply_pii_transform(str(row["text"] or ""), mode=pii_mode)
             new_row["curation_status"] = "approved"
         elif act.action == "edit":
             if act.prompt is not None:
@@ -169,16 +246,26 @@ async def apply_curation_batch(
                 new_row["text"] = act.text
             else:
                 new_row["text"] = f"{new_row['prompt']}\n{new_row['response']}".strip()
+            if ds.dataset_type == "raw":
+                row_valid = bool(str(new_row.get("text") or "").strip())
+            elif act.prompt is not None or act.response is not None:
+                row_valid = bool(str(new_row.get("prompt") or "").strip()) and bool(
+                    str(new_row.get("response") or "").strip()
+                )
+            else:
+                row_valid = bool(str(new_row.get("text") or "").strip())
+            new_row["is_valid"] = row_valid
+            new_row["validation_error"] = "" if row_valid else "EMPTY_CONTENT"
             new_row["curation_status"] = "approved"
 
         updated_rows.append(new_row)
-        db.add(
+        pending_actions.append(
             CurationAction(
                 version_id=ver.id,
                 row_id=rid,
                 action=act.action,
                 old_value=old_snapshot,
-                new_value={"curation_status": new_row["curation_status"]},
+                new_value=_build_redacted_snapshot(new_row),
                 user_id=user_id,
             )
         )
@@ -193,6 +280,14 @@ async def apply_curation_batch(
     next_num = (max_num or ver.version_number) + 1
 
     new_df = pl.DataFrame(updated_rows, schema=df.schema)
+    new_invalid_count = (
+        int(new_df.filter(~pl.col("is_valid")).height) if "is_valid" in new_df.columns else 0
+    )
+    updated_summary = dict(ver.validation_summary or {})
+    updated_summary["total_rows"] = new_df.height
+    updated_summary["invalid_rows"] = new_invalid_count
+    updated_summary["valid_rows"] = max(0, new_df.height - new_invalid_count)
+
     buf = io.BytesIO()
     new_df.write_parquet(buf)
     pq_payload = buf.getvalue()
@@ -209,13 +304,17 @@ async def apply_curation_batch(
         storage_uri=pq_uri,
         raw_storage_uri=ver.raw_storage_uri,
         row_count=new_df.height,
-        invalid_row_count=ver.invalid_row_count,
+        invalid_row_count=new_invalid_count,
         checksum=hashlib.sha256(pq_payload).hexdigest(),
         status="curated",
-        validation_summary=ver.validation_summary,
+        validation_summary=updated_summary,
     )
     db.add(new_ver)
     await db.flush()
+
+    for ca in pending_actions:
+        ca.resulting_version_id = new_ver.id
+        db.add(ca)
 
     await record_audit_log(
         db,
@@ -224,6 +323,7 @@ async def apply_curation_batch(
         target_id=new_ver.id,
         user_id=user_id,
         workspace_id=ds.workspace_id,
+        ip_address=ip_address,
         metadata={
             "parent_version_id": ver.id,
             "new_version_number": next_num,

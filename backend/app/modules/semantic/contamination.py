@@ -5,7 +5,7 @@ import re
 import polars as pl
 
 from app.modules.base import ModuleConfig, ModuleResult, RowFinding
-from app.modules.semantic.embeddings import cosine_similarity, embed_texts_deterministic
+from app.modules.semantic.embeddings import cosine_similarity, embed_texts
 
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 
@@ -22,7 +22,7 @@ class ContaminationDetectionModule:
 
     name = "contamination"
     dimension = "uniqueness_diversity"
-    version = "0.1.0"
+    version = "0.2.0"
 
     def run(
         self,
@@ -34,6 +34,8 @@ class ContaminationDetectionModule:
         raw_benchmarks = config.params.get("benchmark_texts", [])
         benchmark_texts = [str(t) for t in raw_benchmarks if str(t).strip()]
         sim_threshold = float(config.params.get("similarity_threshold", 0.92))
+        embed_model = config.params.get("embedding_model")
+        embed_backend = config.params.get("embedding_backend")
 
         df = data.select(["row_id", "text"]).collect()
         total_rows = df.height
@@ -49,11 +51,19 @@ class ContaminationDetectionModule:
             )
 
         bench_ngrams = [_word_ngrams(b) for b in benchmark_texts]
-        bench_vecs = embed_texts_deterministic(benchmark_texts)
+        bench_vecs, _ = embed_texts(
+            benchmark_texts,
+            model_name=str(embed_model) if embed_model else None,
+            backend=str(embed_backend) if embed_backend else None,
+        )
 
         row_ids = [str(r["row_id"]) for r in df.iter_rows(named=True)]
         texts = [str(r.get("text") or "") for r in df.iter_rows(named=True)]
-        row_vecs = embed_texts_deterministic(texts)
+        row_vecs, _ = embed_texts(
+            texts,
+            model_name=str(embed_model) if embed_model else None,
+            backend=str(embed_backend) if embed_backend else None,
+        )
 
         contaminated = 0
         findings: list[dict[str, object]] = []
@@ -71,7 +81,9 @@ class ContaminationDetectionModule:
                         module=self.name,
                         code="BENCHMARK_CONTAMINATION",
                         severity="critical",
-                        score=round(max(best_sim, 1.0 if ngram_hit else 0.0), 4),
+                        score=round(
+                            max(0.0, min(1.0, max(best_sim, 1.0 if ngram_hit else 0.0))), 4
+                        ),
                         detail={
                             "ngram_overlap": ngram_hit,
                             "semantic_similarity": round(best_sim, 4),

@@ -143,6 +143,7 @@ class Dataset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     dataset_type: Mapped[str] = mapped_column(String(32), default="sft", nullable=False)
+    retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -317,3 +318,78 @@ class ExportRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     storage_uri: Mapped[str] = mapped_column(String(512), default="", nullable=False)
     manifest_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="completed", nullable=False)
+
+
+class RefreshTokenSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Server-side refresh token rotation and family revocation store (SEC-05)."""
+
+    __tablename__ = "refresh_token_sessions"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_jti: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    family_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    replaced_by_jti: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class WebhookSubscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Workspace-scoped webhook subscription triggered on run/export lifecycle events (G5)."""
+
+    __tablename__ = "webhook_subscriptions"
+
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    url: Mapped[str] = mapped_column(String(512), nullable=False)
+    signing_secret: Mapped[str] = mapped_column(String(128), nullable=False)
+    events: Mapped[str] = mapped_column(
+        Text, default="run.completed,run.failed,export.completed", nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class WebhookDelivery(UUIDPrimaryKeyMixin, Base):
+    """Immutable log of webhook delivery attempts (never stores raw PII)."""
+
+    __tablename__ = "webhook_deliveries"
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False, index=True
+    )
+    subscription_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("webhook_subscriptions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    success: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class BenchmarkSet(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Workspace-scoped evaluation/benchmark prompt set for contamination detection (C5)."""
+
+    __tablename__ = "benchmark_sets"
+
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    entry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    prompts_json: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    storage_uri: Mapped[str] = mapped_column(String(512), default="", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )

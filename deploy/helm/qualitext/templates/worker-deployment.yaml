@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "qualitext.fullname" . }}-worker
+  labels:
+    {{- include "qualitext.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.autoscaling.minReplicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "qualitext.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: worker
+          image: {{ .Values.worker.image }}
+          imagePullPolicy: {{ .Values.worker.pullPolicy }}
+          command:
+            - uv
+            - run
+            - celery
+            - -A
+            - app.workers.celery_app
+            - worker
+            - --loglevel=info
+            - --concurrency={{ .Values.worker.concurrency }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "qualitext.fullname" . }}-config
+            - secretRef:
+                name: {{ include "qualitext.fullname" . }}-secret
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}

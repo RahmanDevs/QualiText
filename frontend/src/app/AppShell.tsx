@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   Activity,
   Database,
   FileBarChart2,
+  GitCompare,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -12,8 +13,9 @@ import {
   SlidersHorizontal,
   TableProperties,
 } from 'lucide-react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
 import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
 import { ThemeToggle } from '@/components/shared/ThemeToggle';
 import { useAuthStore } from '@/lib/auth';
@@ -28,6 +30,7 @@ const NAV_ITEMS = [
   { to: '/datasets', key: 'nav.datasets', icon: Database },
   { to: '/runs', key: 'nav.runs', icon: Activity },
   { to: '/explorer', key: 'nav.explorer', icon: TableProperties },
+  { to: '/dedup', key: 'nav.dedup', icon: GitCompare },
   { to: '/policies', key: 'nav.policies', icon: SlidersHorizontal },
   { to: '/reports', key: 'nav.reports', icon: FileBarChart2 },
   { to: '/audit-logs', key: 'nav.auditLogs', icon: ShieldCheck },
@@ -36,8 +39,35 @@ const NAV_ITEMS = [
 
 export function AppShell({ children }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { user, activeWorkspaceId, setActiveWorkspace, logout } = useAuthStore();
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((prev) => !prev);
+      } else if (e.key === 'Escape') {
+        setPaletteOpen(false);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const filteredCommands = NAV_ITEMS.filter((item) => {
+    const label = t(item.key).toLowerCase();
+    return label.includes(paletteQuery.trim().toLowerCase());
+  });
+
+  function handleSelectCommand(to: string) {
+    setPaletteOpen(false);
+    setPaletteQuery('');
+    navigate(to);
+  }
 
   return (
     <div className="flex min-h-screen bg-canvas text-text-primary">
@@ -101,10 +131,14 @@ export function AppShell({ children }: AppShellProps) {
               </select>
             )}
 
-            <div className="hidden items-center gap-2 rounded-control border border-border bg-canvas px-3 py-1.5 text-xs text-text-muted md:flex">
+            <button
+              type="button"
+              onClick={() => setPaletteOpen(true)}
+              className="hidden items-center gap-2 rounded-control border border-border bg-canvas px-3 py-1.5 text-xs text-text-muted transition-colors hover:border-brand-600 hover:text-text-primary md:flex"
+            >
               <Search className="h-3.5 w-3.5" aria-hidden="true" />
               <span>{t('app.searchPlaceholder')}</span>
-            </div>
+            </button>
           </div>
 
           <div className="flex items-center gap-2">
@@ -125,6 +159,55 @@ export function AppShell({ children }: AppShellProps) {
 
         <main className="mx-auto w-full max-w-content flex-1 p-6">{children}</main>
       </div>
+
+      {paletteOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('commandPalette.title')}
+          className="fixed inset-0 z-50 flex items-start justify-center bg-canvas/80 p-4 pt-20"
+        >
+          <div className="w-full max-w-md space-y-3 rounded-card border border-border bg-surface p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-text-primary">
+                {t('commandPalette.title')}
+              </h2>
+              <Button
+                variant="ghost"
+                className="px-2 py-1 text-xs"
+                onClick={() => setPaletteOpen(false)}
+              >
+                {t('commandPalette.close')}
+              </Button>
+            </div>
+            <Input
+              autoFocus
+              aria-label={t('commandPalette.placeholder')}
+              placeholder={t('commandPalette.placeholder')}
+              value={paletteQuery}
+              onChange={(e) => setPaletteQuery(e.target.value)}
+            />
+            <ul className="max-h-60 divide-y divide-border overflow-y-auto text-xs">
+              {filteredCommands.length === 0 ? (
+                <li className="py-3 text-text-muted">{t('commandPalette.empty')}</li>
+              ) : (
+                filteredCommands.map((cmd) => (
+                  <li key={cmd.to}>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectCommand(cmd.to)}
+                      className="flex w-full items-center justify-between px-2 py-2.5 text-left text-text-primary hover:bg-subtle"
+                    >
+                      <span className="font-medium">{t(cmd.key)}</span>
+                      <span className="font-mono text-text-muted">{cmd.to}</span>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

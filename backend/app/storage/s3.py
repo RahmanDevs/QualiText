@@ -1,7 +1,8 @@
 """Object storage abstraction supporting S3/MinIO and local filesystem fast-dev fallback."""
 
+import shutil
 from pathlib import Path
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 import boto3
 from botocore.client import BaseClient
@@ -16,12 +17,20 @@ class StorageBackend(Protocol):
         """Persist bytes at `key` and return the storage URI."""
         ...
 
+    def put_file(self, key: str, fileobj: BinaryIO) -> str:
+        """Stream bytes from `fileobj` to `key` and return the storage URI."""
+        ...
+
     def get_bytes(self, key: str) -> bytes:
         """Read bytes stored at `key`."""
         ...
 
     def exists(self, key: str) -> bool:
         """Return True if `key` exists."""
+        ...
+
+    def delete_key(self, key: str) -> None:
+        """Delete object at `key` if present."""
         ...
 
 
@@ -45,12 +54,22 @@ class LocalStorageBackend:
         target.write_bytes(data)
         return f"local://{key.lstrip('/')}"
 
+    def put_file(self, key: str, fileobj: BinaryIO) -> str:
+        target = self._resolve_safe(key)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("wb") as out:
+            shutil.copyfileobj(fileobj, out)
+        return f"local://{key.lstrip('/')}"
+
     def get_bytes(self, key: str) -> bytes:
         target = self._resolve_safe(key)
         return target.read_bytes()
 
     def exists(self, key: str) -> bool:
         return self._resolve_safe(key).exists()
+
+    def delete_key(self, key: str) -> None:
+        self._resolve_safe(key).unlink(missing_ok=True)
 
 
 class S3StorageBackend:
@@ -78,6 +97,11 @@ class S3StorageBackend:
         self.client.put_object(Bucket=self.bucket, Key=clean_key, Body=data)
         return f"s3://{self.bucket}/{clean_key}"
 
+    def put_file(self, key: str, fileobj: BinaryIO) -> str:
+        clean_key = key.lstrip("/")
+        self.client.upload_fileobj(fileobj, self.bucket, clean_key)
+        return f"s3://{self.bucket}/{clean_key}"
+
     def get_bytes(self, key: str) -> bytes:
         clean_key = key.lstrip("/")
         resp = self.client.get_object(Bucket=self.bucket, Key=clean_key)
@@ -91,6 +115,10 @@ class S3StorageBackend:
             return True
         except Exception:
             return False
+
+    def delete_key(self, key: str) -> None:
+        clean_key = key.lstrip("/")
+        self.client.delete_object(Bucket=self.bucket, Key=clean_key)
 
 
 def get_storage_backend() -> StorageBackend:

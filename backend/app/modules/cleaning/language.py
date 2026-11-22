@@ -103,9 +103,9 @@ class LanguageDetectionModule:
             row_id = str(row["row_id"])
             lang = detect_language(str(row.get("text") or ""))
             counts[lang] += 1
-            if lang == expected_lang or lang == "mixed":
+            if expected_lang == "any" or lang == expected_lang or lang == "mixed":
                 consistent += 1
-            elif expected_lang != "any":
+            else:
                 findings.append(
                     RowFinding(
                         row_id=row_id,

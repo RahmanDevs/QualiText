@@ -63,16 +63,31 @@ def _extract_dimension_score(dim: str, results: list[ModuleResult]) -> float:
             elif "lang_consistency_ratio" in m:
                 scores.append(max(0.0, min(100.0, m["lang_consistency_ratio"] * 100.0)))
         elif dim == "uniqueness_diversity":
-            unique_ratio = m.get("unique_ratio", 1.0)
-            scores.append(max(0.0, min(100.0, unique_ratio * 100.0)))
+            if "unique_ratio" in m:
+                scores.append(max(0.0, min(100.0, m["unique_ratio"] * 100.0)))
+            elif "contamination_ratio" in m:
+                clean_ratio = max(0.0, 1.0 - m["contamination_ratio"])
+                scores.append(max(0.0, min(100.0, clean_ratio * 100.0)))
         elif dim == "instruction_quality":
-            avg_judge = m.get("avg_judge_score", 1.0)
-            scores.append(max(0.0, min(100.0, avg_judge * 100.0)))
+            for key in (
+                "preference_consistency_ratio",
+                "rag_chunk_quality_score",
+                "format_compliance_ratio",
+                "avg_judge_score",
+            ):
+                if key in m:
+                    scores.append(max(0.0, min(100.0, m[key] * 100.0)))
+                    break
+            else:
+                scores.append(100.0)
         elif dim == "safety_bias":
-            toxic_ratio = m.get("toxic_ratio", 0.0)
-            bias_ratio = m.get("bias_ratio", 0.0)
-            clean_safety = max(0.0, 1.0 - toxic_ratio - bias_ratio)
-            scores.append(max(0.0, min(100.0, clean_safety * 100.0)))
+            if "safety_clean_ratio" in m:
+                scores.append(max(0.0, min(100.0, m["safety_clean_ratio"] * 100.0)))
+            else:
+                toxic_ratio = m.get("toxic_ratio", 0.0)
+                bias_ratio = m.get("bias_ratio", 0.0)
+                clean_safety = max(0.0, 1.0 - toxic_ratio - bias_ratio)
+                scores.append(max(0.0, min(100.0, clean_safety * 100.0)))
         else:
             scores.append(100.0)
     return round(sum(scores) / len(scores), 2) if scores else 100.0

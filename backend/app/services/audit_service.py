@@ -2,9 +2,24 @@
 
 from typing import Any
 
+from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AuditLog
+
+
+def extract_client_ip(request: Request | None) -> str | None:
+    """Extract originating client IPv4/IPv6 address from FastAPI Request headers or peer."""
+    if request is None:
+        return None
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        first = forwarded.split(",", 1)[0].strip()
+        if first:
+            return first[:64]
+    if request.client and request.client.host:
+        return str(request.client.host)[:64]
+    return None
 
 
 async def record_audit_log(

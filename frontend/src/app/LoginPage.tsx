@@ -1,20 +1,38 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
 import { ThemeToggle } from '@/components/shared/ThemeToggle';
-import { ApiError } from '@/lib/api';
+import { ApiError, apiFetch } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth';
 import { useTranslation } from '@/lib/i18n';
+
+interface SsoProviders {
+  oidc_enabled: boolean;
+  oidc_provider_name: string;
+  saml_enabled: boolean;
+}
 
 export function LoginPage() {
   const { t } = useTranslation();
   const login = useAuthStore((s) => s.login);
-  const [email, setEmail] = useState('admin@qualitext.id');
-  const [password, setPassword] = useState('Admin123!');
+  const [email, setEmail] = useState(import.meta.env.DEV ? 'admin@qualitext.id' : '');
+  const [password, setPassword] = useState(import.meta.env.DEV ? 'Admin123!' : '');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [ssoProviders, setSsoProviders] = useState<SsoProviders | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    apiFetch<SsoProviders>('/auth/sso/providers', {
+      method: 'GET',
+      signal: controller.signal,
+    })
+      .then((res) => setSsoProviders(res))
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -26,6 +44,25 @@ export function LoginPage() {
       setError(err instanceof ApiError ? err.message : t('auth.errorFallback'));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSsoRedirect(provider: 'oidc' | 'saml') {
+    setError(null);
+    try {
+      if (provider === 'oidc') {
+        const res = await apiFetch<{ authorization_url: string }>('/auth/oidc/login', {
+          method: 'GET',
+        });
+        window.location.assign(res.authorization_url);
+      } else {
+        const res = await apiFetch<{ redirect_url: string }>('/auth/saml/login', {
+          method: 'GET',
+        });
+        window.location.assign(res.redirect_url);
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t('auth.errorFallback'));
     }
   }
 
@@ -83,7 +120,32 @@ export function LoginPage() {
           </Button>
         </form>
 
-        <p className="mt-4 text-xs text-text-muted">{t('auth.demoHint')}</p>
+        {(ssoProviders?.oidc_enabled || ssoProviders?.saml_enabled) && (
+          <div className="mt-4 space-y-2 border-t border-border pt-4">
+            {ssoProviders.oidc_enabled && (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                onClick={() => void handleSsoRedirect('oidc')}
+              >
+                {t('auth.ssoOidcButton', { provider: ssoProviders.oidc_provider_name })}
+              </Button>
+            )}
+            {ssoProviders.saml_enabled && (
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                onClick={() => void handleSsoRedirect('saml')}
+              >
+                {t('auth.ssoSamlButton')}
+              </Button>
+            )}
+          </div>
+        )}
+
+        {import.meta.env.DEV && <p className="mt-4 text-xs text-text-muted">{t('auth.demoHint')}</p>}
       </Card>
     </div>
   );

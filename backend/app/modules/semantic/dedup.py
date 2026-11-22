@@ -22,7 +22,11 @@ def _normalize_text(text: str) -> str:
 def _shingles(text: str, k: int = 5) -> set[int]:
     norm = _normalize_text(text)
     if len(norm) <= k:
-        return {hash(norm) & 0xFFFFFFFF} if norm else set()
+        return (
+            {int.from_bytes(hashlib.blake2b(norm.encode("utf-8"), digest_size=4).digest())}
+            if norm
+            else set()
+        )
     return {
         int.from_bytes(hashlib.blake2b(norm[i : i + k].encode("utf-8"), digest_size=4).digest())
         for i in range(len(norm) - k + 1)

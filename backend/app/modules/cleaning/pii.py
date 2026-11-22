@@ -3,6 +3,7 @@
 import hashlib
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 import polars as pl
 
@@ -16,29 +17,52 @@ class PiiMatch:
     entity_type: str
     start: int
     end: int
-    severity: str
+    severity: Literal["info", "warning", "critical"]
     mask_token: str
 
 
-_PII_PATTERNS: list[tuple[str, re.Pattern[str], str, str]] = [
-    # Indonesian NIK: 16 digits starting with valid province/region digits (11-94)
-    (
-        "PII_NIK",
-        re.compile(r"\b(?:1[1-9]|[2-8]\d|9[0-4])\d{14}\b"),
-        "critical",
-        "[NIK]",
-    ),
-    # Indonesian NPWP: XX.XXX.XXX.X-XXX.XXX
+_PII_PATTERNS: list[tuple[str, re.Pattern[str], Literal["info", "warning", "critical"], str]] = [
+    # Explicitly labeled NPWP (dotted or 15/16-digit) placed before unlabeled numeric NIK
     (
         "PII_NPWP",
         re.compile(r"\b\d{2}\.\d{3}\.\d{3}\.\d-\d{3}\.\d{3}\b"),
         "critical",
         "[NPWP]",
     ),
-    # Indonesian phone numbers (+628..., 628..., 08...)
+    (
+        "PII_NPWP",
+        re.compile(r"(?i:\bNPWP\b)(?:\s+[a-z]{2,12})?\s*[:#-]?\s*(\d{15,16})\b"),
+        "critical",
+        "[NPWP]",
+    ),
+    # Explicitly labeled NIK including space/dash-grouped digits
+    (
+        "PII_NIK",
+        re.compile(r"(?i:\bNIK\b)(?:\s+[a-z]{2,12})?\s*[:#-]?\s*(\d{4}(?:[-\s]\d{4}){3}|\d{16})\b"),
+        "critical",
+        "[NIK]",
+    ),
+    # Bank account / virtual account numbers (allowing bank/account qualifiers before separator)
+    (
+        "PII_BANK_ACCOUNT",
+        re.compile(
+            r"(?i:\b(?:rekening|rek\.?|no\.?\s*rek|virtual\s*account|\bva))"
+            r"(?:\s+[a-z]{2,15}){0,2}\s*[:#-]?\s*(\d[\d\s-]{6,18}\d)\b"
+        ),
+        "critical",
+        "[REKENING]",
+    ),
+    # Unlabeled Indonesian NIK: 16 digits starting with valid province/region digits (11-94)
+    (
+        "PII_NIK",
+        re.compile(r"\b(?:1[1-9]|[2-8]\d|9[0-4])\d{14}\b"),
+        "critical",
+        "[NIK]",
+    ),
+    # Indonesian phone numbers (+62-8..., +62 8..., 628..., 08...)
     (
         "PII_PHONE_ID",
-        re.compile(r"(?:\+62|62|0)8[1-9][0-9\-\s]{7,12}\b"),
+        re.compile(r"(?:\+62|62|0)[-\s]?8[1-9](?:[-\s]?\d){7,11}\b"),
         "critical",
         "[TELEPON]",
     ),
@@ -49,23 +73,54 @@ _PII_PATTERNS: list[tuple[str, re.Pattern[str], str, str]] = [
         "critical",
         "[EMAIL]",
     ),
-    # Bank account / credit card-like 10-16 digit sequences preceded by rekening/rek/kartu
+    # Payment card 16-digit Visa/Mastercard patterns
     (
         "PII_BANK_ACCOUNT",
-        re.compile(r"(?i)(?:rekening|rek\.?|no\.?\s*rek)\s*[:#-]?\s*(\d{8,16})\b"),
+        re.compile(r"\b(?:4\d{3}|5[1-5]\d{2})[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"),
         "critical",
-        "[REKENING]",
+        "[KARTU]",
+    ),
+    # Indonesian person name preceded by explicit label (Nama: ..., Nasabah: ..., a.n.: ...)
+    (
+        "PII_PERSON",
+        re.compile(
+            r"(?i:\b(?:nama(?:\s+lengkap)?|pelanggan|nasabah|pemohon|a\.?n\.?))\s*[:\-]\s*"
+            r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})\b"
+        ),
+        "critical",
+        "[NAMA]",
+    ),
+    # Indonesian honorific + capitalized full name (2-3 words)
+    (
+        "PII_PERSON",
+        re.compile(
+            r"(?i:\b(?:bpk\.?|bapak|ibu|sdr\.?|sdri\.?))\s+"
+            r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b"
+        ),
+        "critical",
+        "[NAMA]",
+    ),
+    # Indonesian street address with house number, RT/RW, or 5-digit postal code
+    (
+        "PII_ADDRESS",
+        re.compile(
+            r"(?i:\b(?:jl\.?|jalan|gg\.?|gang|perum(?:ahan)?|komplek)\s+)"
+            r"[A-Za-z0-9][A-Za-z0-9\s.,/-]{3,60}"
+            r"(?i:\b(?:no\.?\s*\d+|rt\.?\s*\d+\s*/?\s*rw\.?\s*\d+|kode\s*pos\s*\d{5})\b)"
+        ),
+        "critical",
+        "[ALAMAT]",
     ),
 ]
 
 
 def detect_pii_spans(text: str) -> list[PiiMatch]:
-    """Detect PII spans in `text` using Indonesian + standard recognizers."""
-    matches: list[PiiMatch] = []
+    """Detect non-overlapping PII spans in `text` using Indonesian + standard recognizers."""
+    raw_matches: list[PiiMatch] = []
     for entity_type, pattern, severity, mask_token in _PII_PATTERNS:
         for m in pattern.finditer(text):
             start, end = m.span(1) if m.lastindex else m.span()
-            matches.append(
+            raw_matches.append(
                 PiiMatch(
                     entity_type=entity_type,
                     start=start,
@@ -74,8 +129,14 @@ def detect_pii_spans(text: str) -> list[PiiMatch]:
                     mask_token=mask_token,
                 )
             )
-    matches.sort(key=lambda item: item.start)
-    return matches
+    raw_matches.sort(key=lambda item: (item.start, -(item.end - item.start)))
+    resolved: list[PiiMatch] = []
+    last_end = -1
+    for item in raw_matches:
+        if item.start >= last_end:
+            resolved.append(item)
+            last_end = item.end
+    return resolved
 
 
 def apply_pii_transform(text: str, mode: str = "mask") -> str:
@@ -119,33 +180,33 @@ class PiiDetectionModule:
         del seed
         mode = str(config.params.get("mode", "detect_only"))
 
-        df = data.select(["row_id", "text"]).collect()
-        total_rows = df.height
+        total_rows = 0
         rows_with_pii = 0
         findings: list[dict[str, object]] = []
 
-        for row in df.iter_rows(named=True):
-            text = str(row.get("text") or "")
-            matches = detect_pii_spans(text)
-            if matches:
-                rows_with_pii += 1
-            for match in matches:
-                severity = "warning" if mode in {"mask", "hash"} else match.severity
-                findings.append(
-                    RowFinding(
-                        row_id=str(row["row_id"]),
-                        module=self.name,
-                        code=match.entity_type,
-                        severity=severity,
-                        score=0.95,
-                        span=(match.start, match.end),
-                        detail={
-                            "entity_type": match.entity_type,
-                            "mode": mode,
-                            "mask_token": match.mask_token,
-                        },
-                    ).model_dump()
-                )
+        for batch in data.select(["row_id", "text"]).collect_batches(chunk_size=10_000):
+            total_rows += batch.height
+            for row in batch.iter_rows(named=True):
+                text = str(row.get("text") or "")
+                matches = detect_pii_spans(text)
+                if matches:
+                    rows_with_pii += 1
+                for match in matches:
+                    findings.append(
+                        RowFinding(
+                            row_id=str(row["row_id"]),
+                            module=self.name,
+                            code=match.entity_type,
+                            severity=match.severity,
+                            score=0.95,
+                            span=(match.start, match.end),
+                            detail={
+                                "entity_type": match.entity_type,
+                                "mode": mode,
+                                "mask_token": match.mask_token,
+                            },
+                        ).model_dump()
+                    )
 
         pii_per_1k = ((rows_with_pii / total_rows) * 1000.0) if total_rows else 0.0
         clean_ratio = (1.0 - (rows_with_pii / total_rows)) if total_rows else 1.0

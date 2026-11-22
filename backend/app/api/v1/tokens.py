@@ -4,18 +4,20 @@ import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
 from app.core.errors import AppError
+from app.core.security import Permission
 from app.db.models import ApiToken, User
 from app.db.session import get_db
-from app.services.audit_service import record_audit_log
+from app.services.audit_service import extract_client_ip, record_audit_log
 
 router = APIRouter(prefix="/api-tokens", tags=["api-tokens"])
+_VALID_SCOPES = frozenset(p.value for p in Permission) | {"*"}
 
 
 class ApiTokenCreateRequest(BaseModel):
@@ -50,10 +52,26 @@ class ApiTokenSummary(BaseModel):
 @router.post("", response_model=ApiTokenCreatedResponse, status_code=status.HTTP_201_CREATED)
 async def create_api_token(
     payload: ApiTokenCreateRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ApiTokenCreatedResponse:
     """Issue a new scoped API token stored as a SHA-256 hash."""
+    cleaned_scopes = [s.strip() for s in payload.scopes if s.strip()]
+    if not cleaned_scopes:
+        raise AppError(
+            code="INVALID_SCOPE",
+            message="Minimal satu scope izin harus dipilih.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    for scope in cleaned_scopes:
+        if scope not in _VALID_SCOPES or (scope == "*" and not user.is_superadmin):
+            raise AppError(
+                code="INVALID_SCOPE",
+                message=f"Scope token tidak valid: {scope}",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
     raw_secret = f"qt_{secrets.token_urlsafe(32)}"
     token_hash = hashlib.sha256(raw_secret.encode("utf-8")).hexdigest()
     expires_at = datetime.now(UTC) + timedelta(days=payload.expires_in_days)
@@ -62,7 +80,7 @@ async def create_api_token(
         user_id=user.id,
         name=payload.name,
         token_hash=token_hash,
-        scopes=",".join(payload.scopes),
+        scopes=",".join(cleaned_scopes),
         expires_at=expires_at,
     )
     db.add(rec)
@@ -73,7 +91,8 @@ async def create_api_token(
         target_type="api_token",
         target_id=rec.id,
         user_id=user.id,
-        metadata={"name": payload.name, "scopes": payload.scopes},
+        ip_address=extract_client_ip(request),
+        metadata={"name": payload.name, "scopes": cleaned_scopes},
     )
     await db.commit()
     await db.refresh(rec)
@@ -82,7 +101,7 @@ async def create_api_token(
         id=rec.id,
         name=rec.name,
         token=raw_secret,
-        scopes=payload.scopes,
+        scopes=cleaned_scopes,
         expires_at=rec.expires_at,
     )
 
@@ -120,10 +139,11 @@ async def list_api_tokens(
 @router.delete("/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_api_token(
     token_id: str,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Revoke an existing API token."""
+    """Revoke an existing API token and append immutable audit log entry."""
     rec = (
         await db.execute(
             select(ApiToken).where(ApiToken.id == token_id, ApiToken.user_id == user.id)
@@ -132,4 +152,13 @@ async def revoke_api_token(
     if rec is None:
         raise AppError("TOKEN_NOT_FOUND", "Token API tidak ditemukan.", status.HTTP_404_NOT_FOUND)
     rec.is_revoked = True
+    await record_audit_log(
+        db,
+        action="api_token.revoke",
+        target_type="api_token",
+        target_id=rec.id,
+        user_id=user.id,
+        ip_address=extract_client_ip(request),
+        metadata={"name": rec.name},
+    )
     await db.commit()

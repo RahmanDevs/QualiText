@@ -35,7 +35,7 @@ class CurationActionItem(BaseModel):
     """Single row curation action."""
 
     row_id: str
-    action: Literal["approve", "reject", "flag", "edit", "mask_pii"]
+    action: Literal["approve", "reject", "flag", "edit", "mask_pii", "hash_pii", "drop_row"]
     prompt: str | None = None
     response: str | None = None
     text: str | None = None
@@ -63,18 +63,37 @@ class DiffPreviewResponse(BaseModel):
     changed: bool
 
 
+class AiRepairPreviewRequest(BaseModel):
+    """Request AI-assisted or deterministic repair preview for broken PDF/OCR text."""
+
+    text: str
+    instruction: str | None = None
+
+
+class AiRepairPreviewResponse(BaseModel):
+    """Before/after AI repair preview response."""
+
+    before: str
+    after: str
+    changed: bool
+    mode: Literal["llm", "local_heuristic"]
+
+
 class QualityPolicyPayload(BaseModel):
-    """Workspace quality gate policy rules."""
+    """Workspace quality gate policy rules including per-dimension thresholds and DQI cap."""
 
     min_dqi: float = Field(default=60.0, ge=0.0, le=100.0)
     block_if_critical_pii: bool = True
     is_active: bool = True
+    dimension_thresholds: dict[str, float] = Field(default_factory=dict)
+    critical_cap: float = Field(default=60.0, ge=0.0, le=100.0)
+    dimension_weights: dict[str, float] = Field(default_factory=dict)
 
 
 class ExportCreateRequest(BaseModel):
     """Export dataset version request."""
 
-    export_format: Literal["jsonl", "csv", "parquet"] = "jsonl"
+    export_format: Literal["jsonl", "csv", "parquet", "huggingface"] = "jsonl"
     exclude_rejected: bool = True
     only_approved: bool = False
     enforce_quality_gate: bool = True

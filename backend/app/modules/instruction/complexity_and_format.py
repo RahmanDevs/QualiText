@@ -46,9 +46,9 @@ def check_formatting_compliance(prompt: str, response: str) -> list[str]:
 
     if _JSON_REQUEST_RE.search(prompt) and response.strip():
         candidate = response.strip()
-        if "```json" in candidate:
-            parts = candidate.split("```json", 1)[1].split("```", 1)
-            candidate = parts[0].strip()
+        fence_match = re.search(r"```(?:json)?\s*\n(.*?)```", candidate, re.IGNORECASE | re.DOTALL)
+        if fence_match:
+            candidate = fence_match.group(1).strip()
         try:
             json.loads(candidate)
         except json.JSONDecodeError:

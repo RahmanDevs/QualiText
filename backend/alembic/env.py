@@ -11,6 +11,7 @@ from alembic import context
 from app.core.config import get_settings
 from app.db import models  # noqa: F401
 from app.db.base import Base
+from app.db.session import ensure_postgres_version_column_width
 
 config = context.config
 if config.config_file_name is not None:
@@ -38,6 +39,7 @@ def run_migrations_offline() -> None:
 def do_run_migrations(connection: Connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
+        ensure_postgres_version_column_width(connection)
         context.run_migrations()
 
 

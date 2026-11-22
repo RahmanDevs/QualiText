@@ -12,6 +12,7 @@ class DatasetCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = ""
     dataset_type: Literal["sft", "preference", "rag", "raw"] = "sft"
+    retention_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class DatasetVersionSummary(BaseModel):
@@ -38,6 +39,7 @@ class DatasetResponse(BaseModel):
     name: str
     description: str
     dataset_type: str
+    retention_days: int | None = None
     created_at: datetime
     latest_version: DatasetVersionSummary | None = None
 
@@ -52,7 +54,7 @@ class UploadInitRequest(BaseModel):
     """Initialize a chunked upload for a new dataset version."""
 
     filename: str = Field(min_length=1, max_length=255)
-    source_format: Literal["jsonl", "csv", "parquet", "txt"] = "jsonl"
+    source_format: Literal["jsonl", "csv", "parquet", "txt", "pdf", "md"] = "jsonl"
     total_chunks: int = Field(default=1, ge=1, le=10000)
 
 

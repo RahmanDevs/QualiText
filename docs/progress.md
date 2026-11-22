@@ -1,39 +1,17 @@
-# Audit Progress Pengerjaan — QualiText
+# Audit Progress Pengerjaan - QualiText
 
-File ini mencatat status pengerjaan per batch untuk keperluan audit dan pelacakan sesuai `CLAUDE.md` Bagian 4.
+File ini mencatat status pengerjaan aktual per fase dan tahap berdasarkan kode sumber terverifikasi terhadap `CLAUDE.md`.
 
-## Fase 0 — Fondasi
+## Fase 0-4 (Baseline & Tahap 1-4)
 
-| Batch | Deskripsi | Status | Catatan Audit |
+| Tahap | Cakupan Utama | Status | Catatan Audit Kode |
 |---|---|---|---|
-| **Batch 1** | Monorepo, `.python-version` (3.12), `Makefile`, `docker-compose.yml`, `.env.example`, CI | `DONE` | `uv` terkunci di Python 3.12.14; `docker-compose.yml` + Dockerfile siap integrasi multi-device |
-| **Batch 2** | Backend core (FastAPI, config, logging, errors, DB, Alembic, kontrak `QualityModule`) | `DONE` | Komentar arahan ditambahkan pada `app/modules/base.py` (streaming/batch) & `app/db/models.py` + migrasi `0001` (`row_findings` partitioning) |
-| **Batch 3** | Auth dasar, RBAC, Audit Log, Storage/Worker kerangka, Seed, & Tests | `DONE` | `ruff`, `mypy --strict` (8 files), `alembic upgrade head`, `seed`, dan `pytest` (4 passed) lulus |
-| **Batch 4** | Frontend App Shell, `tokens.css`, Light/Dark mode, i18n (`id`/`en`), komponen UI | `DONE` | `eslint`, `tsc --noEmit`, dan `vitest --run` (1 passed) lulus |
-| **Batch 5** | Dokumentasi ADR (Bagian 2.13), `docs/dqi.md`, & verifikasi DoD Fase 0 | `DONE` | ADR-001, ADR-002 (open embedding + placeholder LLM), dan `docs/dqi.md` tersedia |
+| **Fase 0** | Monorepo, auth JWT, RBAC 5 role, audit log, storage S3/local, app shell, i18n (`id`/`en`) | `DONE` | Fondasi API + frontend + ADR-001/002 + `docs/dqi.md` tersedia. |
+| **Tahap 1** | Hotfix & security blockers (`OPS-01`, `SEC-01`-`SEC-03`, `BUG-01`-`BUG-05`) | `DONE` | `httpx` di dependencies utama, redaksi PII di `curation_actions`, proteksi IDOR & Quality Gate, XSS escape HTML, `blake2b` dedup, SFT editor, `test_stage1_security_and_hotfixes.py` (6 backend) & `Stage1Hotfixes.test.tsx` (2 frontend). |
+| **Tahap 2** | Arsitektur worker Celery/Redis, streaming upload, migrasi `0003`, P0 A-F + UI Explorer | `DONE` | `execute_quality_run_task` + pub/sub SSE, `SpooledTemporaryFile`, bulk insert finding 1000 baris, ekspor Hugging Face `.zip` + manifest, Column Mapping UI, Validation Errors UI/download, histogram token, `PII_PERSON`/`PII_ADDRESS`, `hash_pii`/`drop_row`, `VirtualizedDataTable`, keyboard shortcuts, i18n penuh. |
+| **Tahap 3** | Penuntasan v1.0 (P1) & Enterprise Readiness (`G1`, `G4`, `G5`, `G6`, `SEC-04`, `SEC-05`, `C2`, `C3`, `D2`, `E1`, `F6`, `F7`, `F8`) | `DONE` | Token `qt_...` + scope check, OIDC/SAML SSO, rotasi refresh token + reuse detection, rate limit `/auth/login`, production `SECRET_KEY` guard, `is_local_llm_url`, Webhooks anti-SSRF + HMAC, audit log lengkap + CSV/JSON export, `/readyz` + `/metrics` Prometheus + OTel, migrasi `0004`, cache embedding + LSH/FAISS hook + canonical terpanjang + 2D PCA cluster, rubrik LLM-Judge & bias ID/EN, laporan PDF, policy per dimensi + custom bobot/cap DQI, UI live Overview/Dedup Review/Settings/CommandPalette, Helm `templates/`, Nginx `frontend/Dockerfile`, dan CI security/a11y. |
+| **Tahap 4** | Pendalaman P2, UU PDP, Streaming Validator & Benchmarks (`A1`, `A6`, `B1`, `C5`, `D4`, `D5`, `E2`, `E3`, `ARCH-01`) | `DONE` | Migrasi `0005` (`retention_days` + `benchmark_sets`), `DatabaseConnector` read-only + `SharePointConnector` OAuth HTTPS anti-SSRF gated admin (`/import-connector`), CRUD/upload `BenchmarkSet` + integrasi `run_service` (`C5`), hak hapus UU PDP `DELETE /datasets/{id}` + `retention` policy & purge (`workspaces`), `validate_content_magic` + `parse_and_validate_stream` + kolom eksplisit `chosen`/`rejected`, upgrade modul `D4`/`D5`/`E2`/`E3` (taxonomy `HARMFUL_CONTENT_RISK` + opt-in local LLM judge), penyelarasan metrik eksplisit `dqi.py`, kalibrasi PII ID, font offline air-gapped tanpa CDN Google Fonts, modal Konektor/Hapus Dataset UI, tab Settings Benchmarks & Retensi UU PDP (`id`/`en`), `seed.py` demo korpus/benchmark sintetis, serta `scripts/benchmark_models.py` & `docs/benchmarks.md` (`test_stage4_p2_and_benchmarks.py` + `Stage4P2Features.test.tsx`). |
 
----
+## Catatan Lingkungan Produksi (Di Luar Kode Aplikasi Offline)
 
-## Fase 1 — MVP Inti (Prioritas P0)
-
-| Batch | Deskripsi | Status | Catatan Audit |
-|---|---|---|---|
-| **Batch 1** | DB Models Fase 1, Migrasi `0002`, Upload Chunked, Ingesti & Validasi (A1–A4) | `DONE` | Migrasi `0002_fase1_mvp_tables` diterapkan; parser JSONL/CSV/Parquet/TXT + mapping aktif |
-| **Batch 2** | Quality Modules (A5 Token, B1–B3/B6 PII ID + Artefak + Diff, C1 Dedup) & DQI (F1) | `DONE` | Semua modul lolos `mypy --strict`; DQI parsial + critical cap 60 terverifikasi |
-| **Batch 3** | API Explorer, Kurasi Immutable (F3), Quality Gate, & Ekspor (F5) + SSE | `DONE` | E2E `pytest` (`test_fase1_pipeline.py`) lulus penuh termasuk PII masking & immutable v2 |
-| **Batch 4** | Frontend MVP (Datasets, Upload/Mapping, Run/DQI Report, Explorer/Kurasi, Export) | `DONE` | `eslint`, `tsc --noEmit`, dan `vitest --run` lulus |
-
-## Fase 2 — v1.0 (Prioritas P1)
-
-| Batch | Deskripsi | Status | Catatan Audit |
-|---|---|---|---|
-| **Batch 1** | Modul B4 (Bahasa), B5 (Toksisitas), C2–C4 (Dedup Semantik, Clustering 2D, N-gram) | `DONE` | Semua modul lolos `mypy --strict`; embedding deterministik offline siap |
-| **Batch 2** | Modul D1–D3 (Kompleksitas, LLM-Judge Placeholder/OpenAI, Format) & E1 (Bias) + Full DQI | `DONE` | 5 dimensi penuh (`is_partial=False`) terhitung |
-| **Batch 3** | F4 (Compare Versi), F6 (Laporan HTML), G1 (OIDC), G5 (API Token & Webhook), G6 (Helm) + UI & Tests | `DONE` | `pytest` (6 passed) & `vitest` (2 passed) lulus |
-
-## Fase 3 — Pasca v1.0 (Prioritas P2)
-
-| Batch | Deskripsi | Status | Catatan Audit |
-|---|---|---|---|
-| **Batch 1** | Konektor Sumber Data (A6), Kontaminasi Benchmark (C5), RLHF Preference (D4), RAG Chunk Quality (D5) | `DONE` | Semua modul lolos `mypy --strict`; `CONNECTOR_REGISTRY` & detector kontaminasi aktif |
-| **Batch 2** | Risiko Halusinasi & Prompt Injection (E2–E3), Tren DQI (F8), & Verifikasi Penuh | `DONE` | `pytest` (8 passed) & `vitest` (2 passed) lulus |
+- Eksekusi langsung cluster PostgreSQL 16 + `pgvector` partisi HASH, MinIO/S3, Redis + Celery multi-worker, Trivy/Playwright CI, dan benchmark skala klaster 100 ribu-5 juta baris atau model `sentence-transformers` + `faiss` dijalankan di infrastruktur/CI berjaringan target.
