@@ -539,7 +539,7 @@ def test_logic08_09_10_12_module_correctness(monkeypatch: pytest.MonkeyPatch) ->
     from app.modules.semantic import semantic_dedup as sd_mod
 
     monkeypatch.setattr(
-        sd_mod, "embed_texts", lambda texts, **_k: ([[1.0, 0.0], [-1.0, 0.0]], "local_hash")
+        sd_mod, "embed_texts", lambda _texts, **_k: ([[1.0, 0.0], [-1.0, 0.0]], "local_hash")
     )
     monkeypatch.setattr(sd_mod, "find_similar_candidates", lambda *_a, **_k: [(0, 1, 0.95)])
     sd_df = pl.DataFrame(

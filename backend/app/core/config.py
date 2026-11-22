@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = ""
 
+    # VLM verification placeholder (PDF page-image vs extracted text/table)
+    vlm_provider: str = "placeholder"
+    vlm_base_url: str = "http://localhost:11434/v1"
+    vlm_api_key: str = ""
+    vlm_model: str = ""
+
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":
         """Reject insecure default secret keys when running in production."""

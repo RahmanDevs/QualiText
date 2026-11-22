@@ -77,7 +77,6 @@ class ExactAndNearDedupModule:
         findings: list[dict[str, object]] = []
 
         buckets: dict[tuple[int, tuple[int, ...]], list[tuple[str, list[int]]]] = defaultdict(list)
-        unique_signatures: dict[str, list[int]] = {}
 
         for row in df.iter_rows(named=True):
             row_id = str(row["row_id"])
@@ -102,7 +101,6 @@ class ExactAndNearDedupModule:
             seen_exact[digest] = row_id
             shingles = _shingles(text)
             sig = _minhash_signature(shingles, salts)
-            unique_signatures[row_id] = sig
 
             matched_canonical: str | None = None
             best_sim = 0.0

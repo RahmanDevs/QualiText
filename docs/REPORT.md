@@ -6,34 +6,36 @@ Dokumen ini menyajikan kondisi teknis terkini platform **QualiText** berdasarkan
 
 ## 1. Ringkasan Eksekutif & Status Verifikasi Terkini
 
-**Verdict Teknis:** QualiText telah menuntaskan seluruh milestone pengembangan aplikasi dari **Fase 0 (Fondasi)**, **Tahap 1 (P0 Hotfix & Security Blockers)**, **Tahap 2 (MVP P0 & Arsitektur Worker/Skala)**, **Tahap 3 (v1.0 P1 & Enterprise Readiness)**, **Tahap 4 (Pasca-v1.0 P2, Kepatuhan UU PDP & Benchmark Sintetis)**, hingga **Audit Logika Full-Stack (`LOGIC-01`–`LOGIC-14`) & Automated E2E Testing Playwright**.
+**Verdict Teknis:** QualiText telah menuntaskan seluruh milestone pengembangan aplikasi dari **Fase 0 (Fondasi)**, **Tahap 1 (P0 Hotfix & Security Blockers)**, **Tahap 2 (MVP P0 & Arsitektur Worker/Skala)**, **Tahap 3 (v1.0 P1 & Enterprise Readiness)**, **Tahap 4 (Pasca-v1.0 P2, Kepatuhan UU PDP & Benchmark Sintetis)**, **Audit Logika Full-Stack (`LOGIC-01`–`LOGIC-14`) & Automated E2E Testing Playwright**, hingga **Ekstensi Kualitas Linguistik (Perplexity/OOV), Verifikasi VLM PDF, Semantic Chunking RAG & Generator QA/SFT (Milestone 7)**.
 
 ### Hasil Verifikasi Otomatis & Benchmark Terkini
-Seluruh pemeriksaan statis, pengujian regresi, uji E2E browser penuh, benchmark model sintetis, dan build produksi lulus (`exit code 0`):
-- **Dependency Lock:** `uv --directory backend lock --offline --check` bersih (`78 packages` tersinkronisasi dengan [uv.lock](backend/uv.lock)).
-- **Backend Lint & Format:** `ruff check .` bersih; `ruff format --check .` bersih (`85 files already formatted`).
-- **Backend Type-Check:** `mypy --strict app/core app/modules` bersih (`28 source files`).
-- **Frontend Lint, Type-Check & Build:** `eslint .` bersih; `tsc --noEmit` bersih; `npm run build` (`tsc -b && vite build`) lulus mentransformasi `1659` modul ke bundle produksi (`dist/` dalam `4.66s`).
-- **Backend Tests (`pytest -v`):** **52 passed** di 10 file uji (`26.06s`):
+Seluruh pemeriksaan statis, pengujian regresi, build produksi, dan benchmark model sintetis lulus (`exit code 0`):
+- **Dependency Lock:** `uv lock --offline --check` bersih (`78 packages` tersinkronisasi dengan [uv.lock](backend/uv.lock)).
+- **Backend Lint & Format:** `ruff check .` bersih; `ruff format --check .` bersih (`94 files already formatted`).
+- **Backend Type-Check:** `mypy --strict app/core app/modules` bersih (`33 source files`).
+- **Frontend Lint, Type-Check & Build:** `eslint .` bersih; `tsc --noEmit` bersih; `npm run build` (`tsc -b && vite build`) lulus mentransformasi `1659` modul ke bundle produksi (`dist/` dalam `4.90s`).
+- **Backend Tests (`pytest -v`):** **57 passed** di 11 file uji (`44.02s`):
   - [test_audit_logic_fixes.py](backend/tests/test_audit_logic_fixes.py) (9 tes — regresi audit logika `LOGIC-01` s.d. `LOGIC-14`)
   - [test_auth_and_health.py](backend/tests/test_auth_and_health.py) (7 tes)
   - [test_fase1_pipeline.py](backend/tests/test_fase1_pipeline.py) (1 tes)
   - [test_fase2_v1.py](backend/tests/test_fase2_v1.py) (1 tes)
   - [test_fase3_p2.py](backend/tests/test_fase3_p2.py) (2 tes)
+  - [test_nlp_vlm_rag_sft_extensions.py](backend/tests/test_nlp_vlm_rag_sft_extensions.py) (5 tes — kualitas linguistik B7, verifikasi VLM PDF D6, semantic chunking + `rag_vector`, dan sintesis QA/SFT + `sft_chat`)
   - [test_pdf_and_ai_repair.py](backend/tests/test_pdf_and_ai_repair.py) (1 tes)
   - [test_stage1_security_and_hotfixes.py](backend/tests/test_stage1_security_and_hotfixes.py) (6 tes)
   - [test_stage2_mvp_and_scale.py](backend/tests/test_stage2_mvp_and_scale.py) (7 tes)
   - [test_stage3_enterprise_and_v1.py](backend/tests/test_stage3_enterprise_and_v1.py) (11 tes)
   - [test_stage4_p2_and_benchmarks.py](backend/tests/test_stage4_p2_and_benchmarks.py) (7 tes)
-- **Frontend Tests (`vitest --run`):** **7 test files, 21 tests passed** (`7.49s`):
+- **Frontend Tests (`vitest --run`):** **8 test files, 23 tests passed** (`6.20s`):
   - [AuditLogicFixes.test.tsx](frontend/tests/AuditLogicFixes.test.tsx) (6 tes — regresi audit logika UI)
   - [AppShell.test.tsx](frontend/tests/AppShell.test.tsx) (1 tes)
+  - [NlpRagVlmExtensions.test.tsx](frontend/tests/NlpRagVlmExtensions.test.tsx) (2 tes — modal Pipeline NLP/RAG, VLM PDF, Semantic Chunking, QA/SFT, kartu RunsPage, dan ekspor `rag_vector`/`sft_chat`)
   - [ScoreCard.test.tsx](frontend/tests/ScoreCard.test.tsx) (1 tes)
   - [Stage1Hotfixes.test.tsx](frontend/tests/Stage1Hotfixes.test.tsx) (2 tes)
   - [Stage2MvpAndI18n.test.tsx](frontend/tests/Stage2MvpAndI18n.test.tsx) (3 tes)
   - [Stage3EnterpriseAndV1.test.tsx](frontend/tests/Stage3EnterpriseAndV1.test.tsx) (5 tes)
   - [Stage4P2Features.test.tsx](frontend/tests/Stage4P2Features.test.tsx) (3 tes)
-- **Playwright Automated E2E Tests (`npm run test:e2e`, Chromium headless):** **10 passed** (`58.1s`) di [qualitext.e2e.spec.ts](frontend/e2e/qualitext.e2e.spec.ts) dengan konfigurasi [playwright.config.ts](frontend/playwright.config.ts).
+- **Playwright Automated E2E Tests (`npm run test:e2e`, Chromium headless):** **11 passed** (`1.2m`) di [qualitext.e2e.spec.ts](frontend/e2e/qualitext.e2e.spec.ts) dengan konfigurasi [playwright.config.ts](frontend/playwright.config.ts) (seluruh 10 skenario Milestone 6 ditambah Skenario 11 untuk kualitas linguistik B7, verifikasi VLM PDF D6, semantic chunking + ekspor `rag_vector`, dan sintesis QA/SFT + ekspor `sft_chat`).
 - **Benchmark Sintetis ([benchmark_models.py](backend/scripts/benchmark_models.py), [docs/benchmarks.md](docs/benchmarks.md)):**
   - **Deteksi PII Indonesia (`B1`):** Recall **`1.0000`** (target `>= 0.95`), Precision **`1.0000`**, F1 **`1.0000`** (`12` positif sintetis, `6` negatif; `tp=12`, `fp=0`, `fn=0`, `tn=6`).
   - **Deduplikasi Eksak & Semantik (`C1`, `C2`):** Precision **`1.0000`** (target `>= 0.90`), Recall **`1.0000`** (`12` baris sintetis, `4` duplikat; `tp=4`, `fp=0`, `fn=0`).
@@ -84,7 +86,7 @@ flowchart LR
 
 ## 3. Inventaris Modul Kualitas & Status Implementasi (A sampai G)
 
-Seluruh 15 modul di `MODULE_REGISTRY` ([run_service.py](backend/app/services/run_service.py)) mengimplementasikan kontrak `QualityModule` ([base.py](backend/app/modules/base.py)).
+Seluruh 17 modul di `MODULE_REGISTRY` ([run_service.py](backend/app/services/run_service.py)) mengimplementasikan kontrak `QualityModule` ([base.py](backend/app/modules/base.py)).
 
 | ID | Modul & File Utama | Dimensi DQI | Status | Kapabilitas Terimplementasi |
 |---|---|---|---|---|
@@ -95,6 +97,7 @@ Seluruh 15 modul di `MODULE_REGISTRY` ([run_service.py](backend/app/services/run
 | **B3** | **Artifact Cleaning** ([artifacts.py](backend/app/modules/cleaning/artifacts.py)) | Kebersihan & Privasi | `Lengkap` | Pemrosesan per batch; deteksi & pembersihan HTML, *zero-width characters*, *mojibake*, dan normalisasi Unicode NFKC (`clean_text_artifacts`). |
 | **B4** | **Language Detection** ([language.py](backend/app/modules/cleaning/language.py)) | Kebersihan & Privasi | `Siap (Heuristik)` | Klasifikasi per baris (`id`, `en`, `mixed`, `unknown`) dan konsistensi bahasa korpus (`LANG_MISMATCH`). |
 | **B5** | **Toxicity Filter** ([toxicity.py](backend/app/modules/cleaning/toxicity.py)) | Keamanan & Bias | `Siap (Leksikon)` | Pemindaian kata kasar/toksisitas bahasa Indonesia dan Inggris (`TOXIC_LANGUAGE`). |
+| **B7** | **Linguistic Quality** ([linguistic.py](backend/app/modules/cleaning/linguistic.py), [lexicon.py](backend/app/modules/cleaning/lexicon.py)) | Kebersihan & Privasi | `Lengkap (Hybrid)` | *Perplexity* character n-gram LM (dengan hook opsional `kenlm` / `hf`), deteksi kata valid vs OOV memakai stemmer + leksikon ID/EN/teknis, dan deteksi noise OCR/gibberish (`HIGH_PERPLEXITY`, `HIGH_OOV_RATIO`, `OCR_GIBBERISH_NOISE`). |
 | **C1** | **Exact & Near Dedup** ([dedup.py](backend/app/modules/semantic/dedup.py)) | Keunikan & Keberagaman | `Lengkap` | Deduplikasi eksak SHA-256 (`DUP_EXACT`) dan near-dedup MinHash 32-perm / LSH 8-band deterministik via `blake2b` (`DUP_NEAR`). |
 | **C2** | **Semantic Dedup** ([semantic_dedup.py](backend/app/modules/semantic/semantic_dedup.py), [embeddings.py](backend/app/modules/semantic/embeddings.py)) | Keunikan & Keberagaman | `Lengkap (Hybrid)` | Bounded LRU embedding cache (`50.000` entri), hook `sentence-transformers` & `faiss`/`pgvector` dengan fallback deterministik `local_hash` + multi-table SimHash LSH, pemilihan kanonik terpanjang, dan UI [DedupReviewPage.tsx](frontend/src/features/dedup/DedupReviewPage.tsx). |
 | **C3-C4** | **Topic Clustering & N-gram** ([clustering.py](backend/app/modules/semantic/clustering.py)) | Keunikan & Keberagaman | `Lengkap` | K-means sferis, proyeksi 2D PCA (`project_vectors_2d`), kata kunci teratas tersamar PII, `cluster_entropy`, `NGRAM_REPETITION` intra-baris, dan `cross_row_ngram_overlap_ratio` lintas baris (`ClusterScatterChart`). |
@@ -102,10 +105,11 @@ Seluruh 15 modul di `MODULE_REGISTRY` ([run_service.py](backend/app/services/run
 | **D1, D3** | **Complexity & Format** ([complexity_and_format.py](backend/app/modules/instruction/complexity_and_format.py)) | Kualitas Instruksi-Respons | `Lengkap` | Klasifikasi kompleksitas (`simple`/`moderate`/`complex`), deteksi blok kode tak tertutup (`UNCLOSED_CODE_BLOCK`), dan validasi JSON respons (`INVALID_JSON_RESPONSE`). |
 | **D2** | **LLM-as-a-Judge** ([llm_judge.py](backend/app/modules/instruction/llm_judge.py)) | Kualitas Instruksi-Respons | `Lengkap` | Endpoint kompatibel OpenAI terproteksi `is_local_llm_url`, shared `httpx.Client`, rubrik & `criteria_weights` kustom (`rubric_hash`), serta sampling deterministik berbasis `seed`. |
 | **D4** | **RLHF Preference** ([preference.py](backend/app/modules/instruction/preference.py)) | Kualitas Instruksi-Respons | `Lengkap` | Membaca kolom eksplisit `chosen`/`rejected` (atau fallback `messages_json`), mendeteksi `PREF_PAIR_INCOMPLETE`, `PREF_PAIR_IDENTICAL`, `PREF_PAIR_NEAR_DUPLICATE`, dan `PREF_PAIR_LENGTH_ANOMALY` (`preference_consistency_ratio`). |
-| **D5** | **RAG Chunk Quality** ([rag_quality.py](backend/app/modules/instruction/rag_quality.py)) | Kualitas Instruksi-Respons | `Lengkap` | Menandai chunk terlalu pendek/panjang, kalimat terpotong, noise simbol/entropi rendah (`RAG_CHUNK_LOW_ENTROPY`), dan duplikasi konteks (`RAG_CHUNK_CONTEXT_DUPLICATE`, `rag_chunk_quality_score`). |
+| **D5** | **RAG Chunk Quality & Semantic Chunker** ([rag_quality.py](backend/app/modules/instruction/rag_quality.py), [semantic_chunker.py](backend/app/modules/ingestion/semantic_chunker.py)) | Kualitas Instruksi-Respons | `Lengkap` | Penilaian kelayakan chunk RAG (`RAG_CHUNK_*`) plus *automatic semantic chunking* berbasis embedding segmen dan *metadata enrichment* bebas PII untuk Vector DB. |
+| **D6** | **VLM PDF Verifier & QA/SFT Synthesizer** ([vlm_verifier.py](backend/app/modules/instruction/vlm_verifier.py), [qa_synthesizer.py](backend/app/modules/instruction/qa_synthesizer.py)) | Kualitas Instruksi-Respons | `Lengkap (Hybrid)` | Verifikasi ekstraksi teks & tabel PDF terhadap struktur visual/gambar halaman (`VLM_SCANNED_PAGE_LOW_TEXT`, `VLM_TABLE_STRUCTURE_MISMATCH`, hook VLM OpenAI-compatible lokal), serta sintesis otomatis pasangan QA/SFT (`local_template` maupun LLM lokal). |
 | **E1** | **Bias Scanner** ([bias.py](backend/app/modules/safety/bias.py)) | Keamanan & Bias | `Lengkap` | Pemindaian stereotip ID & EN across 4 kategori (`gender_stereotype`, `ethnic_religion_bias`, `socioeconomic_bias`, `age_disability_bias`) beserta rincian metrik per kategori. |
 | **E2-E3** | **Hallucination, Harmful & Injection** ([hallucination_and_injection.py](backend/app/modules/safety/hallucination_and_injection.py)) | Keamanan & Bias | `Lengkap` | Deteksi `PROMPT_INJECTION_RISK`, taksonomi berbahaya `HARMFUL_CONTENT_RISK` (`cyber_exploitation`, `self_harm_instruction`), dan `HALLUCINATION_RISK` via heuristik maupun hook opt-in LLM-judge lokal. |
-| **F1-F8** | **DQI, Explorer, Kurasi, Compare, Export, Report & Policy** ([dqi.py](backend/app/scoring/dqi.py), [curation_service.py](backend/app/services/curation_service.py), [export_service.py](backend/app/services/export_service.py), [report_service.py](backend/app/services/report_service.py)) | Lintas Dimensi | `Lengkap` | Penyelarasan metrik eksplisit DQI (`ARCH-01`), custom bobot & `critical_cap` workspace, kurasi immutable `v1 -> v2` dengan redaksi PII, ekspor JSONL/CSV/Parquet/Hugging Face `.zip` + manifest, laporan HTML & PDF 1.4, quality gate per dimensi, dan tren DQI. |
+| **F1-F8** | **DQI, Explorer, Kurasi, Compare, Export, Report & Policy** ([dqi.py](backend/app/scoring/dqi.py), [curation_service.py](backend/app/services/curation_service.py), [export_service.py](backend/app/services/export_service.py), [report_service.py](backend/app/services/report_service.py)) | Lintas Dimensi | `Lengkap` | Penyelarasan metrik eksplisit DQI (`ARCH-01`), custom bobot & `critical_cap` workspace, kurasi immutable `v1 -> v2` dengan redaksi PII, ekspor JSONL/CSV/Parquet/Hugging Face `.zip`/`rag_vector`/`sft_chat` + manifest, laporan HTML & PDF 1.4, quality gate per dimensi, dan tren DQI. |
 | **G1-G6** | **SSO, RBAC, Workspace, Audit, Tokens, Webhooks, UU PDP & Helm** ([auth.py](backend/app/api/v1/auth.py), [deps.py](backend/app/core/deps.py), [webhooks.py](backend/app/api/v1/webhooks.py), [workspaces.py](backend/app/api/v1/workspaces.py), [deploy/helm/qualitext](deploy/helm/qualitext/Chart.yaml)) | Platform & Governance | `Lengkap` | JWT + rotasi refresh token (`SEC-05`), rate limiter login, SSO OIDC & SAML 2.0, token `qt_...` ter-scope, Webhooks HMAC anti-SSRF, audit log + ekspor CSV/JSON (`SEC-04`), hak hapus & retensi UU PDP, Nginx prod Dockerfile, dan 11 template Helm. |
 
 ---
@@ -207,6 +211,12 @@ Pengujian E2E dijalankan menggunakan **`@playwright/test@1.63.0`** (Chromium hea
 | **8** | `8. Audit Logs filtering and CSV/JSON export` | Filter aksi `policy.update` serta unduh dan verifikasi payload `CSV` dan `JSON` | `PASSED` | `1.4s` |
 | **9** | `9. Settings Enterprise tabs: API Tokens, Webhooks, SSO, Benchmarks, and UU PDP Retention` | Buat/cabut API Token (`qt_...`), tolak SSRF webhook + buat/hapus webhook (`whsec_...`), cek status SSO OIDC/SAML, tambah/hapus benchmark kontaminasi, dan simpan/purge retensi UU PDP | `PASSED` | `2.6s` |
 | **10** | `10. Multi-role RBAC & cache isolation across Viewer and Governance` | Verifikasi akun `viewer@qualitext.id` ditolak di Audit Log/Webhook/buat Dataset/Reveal PII (tanpa hapus tabel atau kebocoran cache sesi Admin), lalu verifikasi `sari@qualitext.id` (Governance) dapat membuka Audit Log (`pii.reveal`) & Kebijakan | `PASSED` | `24.8s` |
+
+### Milestone 7: Ekstensi Kualitas Linguistik (B7), Verifikasi VLM PDF (D6), Semantic Chunking & Generator QA/SFT (22 November 2026 — `SELESAI`)
+- **Analisis Kualitas Linguistik (`B7` — [lexicon.py](backend/app/modules/cleaning/lexicon.py), [linguistic.py](backend/app/modules/cleaning/linguistic.py)):** Menambahkan leksikon dasar Indonesia/Inggris/teknis + stemmer morfologi (`normalize_id_stem`, `normalize_en_stem`), `CharNgramLanguageModel` deterministik dengan hook opsional `kenlm` / `hf` untuk perhitungan *perplexity*, rasio kata valid vs *Out-of-Vocabulary (OOV)*, serta deteksi *gibberish*/OCR noise (`HIGH_PERPLEXITY`, `HIGH_OOV_RATIO`, `OCR_GIBBERISH_NOISE`) dan integrasi DQI (`linguistic_quality_ratio`).
+- **Verifikasi VLM & Struktur Halaman PDF (`D6` — [vlm_verifier.py](backend/app/modules/instruction/vlm_verifier.py), [config.py](backend/app/core/config.py)):** Menambahkan `VlmPdfVerifierModule` dan endpoint `POST /api/v1/versions/{id}/vlm-verify` dengan inspeksi struktur PDF (`pypdf` layout, XObject `/Image`, operator tabel vektor, deteksi glyph `(cid:...)`) plus *rasterizer* opsional (`pypdfium2` / `fitz` / `pdftoppm` / `pypdf_inspector`) serta hook VLM multimodal OpenAI-compatible lokal (`VLM_PROVIDER`, `VLM_MODEL`, `VLM_BASE_URL` terproteksi `is_local_llm_url`).
+- **Semantic Chunking + Metadata Enrichment & Generator QA/SFT (`D5`/`D6`/`F5` — [semantic_chunker.py](backend/app/modules/ingestion/semantic_chunker.py), [qa_synthesizer.py](backend/app/modules/instruction/qa_synthesizer.py), [pipeline_service.py](backend/app/services/pipeline_service.py), [pipelines.py](backend/app/api/v1/pipelines.py), [export_service.py](backend/app/services/export_service.py)):** Menambahkan `POST /api/v1/versions/{id}/semantic-chunk` (pemecahan berbasis segmen/heading + embedding + metadata bebas PII), `POST /api/v1/versions/{id}/generate-qa` (sintesis pasangan QA/SFT tervalidasi `local_template` maupun LLM lokal ke versi baru atau dataset SFT baru), katalog `GET /api/v1/modules`, serta format ekspor baru `rag_vector` (JSONL Vector DB) dan `sft_chat` (ChatML/TRL JSONL) di samping peningkatan kolom `messages_json`/`metadata_json` pada ekspor Hugging Face.
+- **UI & Verifikasi Regresi Milestone 7:** Menambahkan modal **Pipeline NLP/RAG** di [DatasetsPage.tsx](frontend/src/features/datasets/DatasetsPage.tsx), kartu ringkasan **Kualitas Linguistik** & **Verifikasi VLM PDF** di [RunsPage.tsx](frontend/src/features/runs/RunsPage.tsx), serta opsi ekspor `rag_vector`/`sft_chat` dan tampilan metadata di [ExplorerPage.tsx](frontend/src/features/explorer/ExplorerPage.tsx) ([id.json](frontend/src/locales/id.json), [en.json](frontend/src/locales/en.json)); diverifikasi oleh 5 tes backend di [test_nlp_vlm_rag_sft_extensions.py](backend/tests/test_nlp_vlm_rag_sft_extensions.py), 2 tes frontend di [NlpRagVlmExtensions.test.tsx](frontend/tests/NlpRagVlmExtensions.test.tsx), serta Skenario E2E #11 di [qualitext.e2e.spec.ts](frontend/e2e/qualitext.e2e.spec.ts) (`11 passed` dalam `1.2m`).
 
 ---
 

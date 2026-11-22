@@ -7,9 +7,9 @@ Mengacu pada `CLAUDE.md` Bagian 2.7, DQI adalah skor kesehatan dataset pada rent
 | Dimensi | Bobot Default | Keterangan |
 |---|---:|---|
 | Validitas Struktur | 15% | % baris valid skema, kelengkapan pasangan, kepatuhan format |
-| Kebersihan & Privasi | 25% | PII per 1.000 baris, % artefak, konsistensi bahasa |
+| Kebersihan & Privasi | 25% | PII per 1.000 baris, % artefak, konsistensi bahasa, kualitas linguistik (`linguistic_quality_ratio`: perplexity, OOV, OCR noise) |
 | Keunikan & Keberagaman | 20% | Rasio duplikat eksak/near/semantik, entropi cluster, n-gram |
-| Kualitas Instruksi–Respons | 25% | Skor LLM-judge, kompleksitas, kepatuhan format |
+| Kualitas Instruksi–Respons | 25% | Skor LLM-judge, kompleksitas, kepatuhan format, kualitas chunk RAG, verifikasi VLM PDF (`vlm_verification_score`) |
 | Keamanan & Bias | 15% | % toksisitas, indeks bias, risiko halusinasi |
 
 ## Aturan Penilaian

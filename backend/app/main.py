@@ -19,6 +19,7 @@ from app.api.v1 import (
     connectors,
     curation,
     datasets,
+    pipelines,
     runs,
     tokens,
     webhooks,
@@ -106,6 +107,7 @@ api_v1.include_router(tokens.router)
 api_v1.include_router(webhooks.router)
 api_v1.include_router(connectors.router)
 api_v1.include_router(benchmarks.router)
+api_v1.include_router(pipelines.router)
 app.include_router(api_v1)
 
 

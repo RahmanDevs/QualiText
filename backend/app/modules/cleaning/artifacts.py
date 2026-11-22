@@ -19,8 +19,7 @@ def clean_text_artifacts(text: str) -> str:
     cleaned = _ZERO_WIDTH_RE.sub("", cleaned)
     cleaned = html.unescape(cleaned)
     cleaned = _HTML_TAG_RE.sub(" ", cleaned)
-    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
-    return cleaned
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
 
 
 class ArtifactCleaningModule:

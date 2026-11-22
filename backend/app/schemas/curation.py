@@ -18,6 +18,7 @@ class RowItemResponse(BaseModel):
     validation_error: str
     curation_status: str
     has_pii: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class PaginatedRowsResponse(BaseModel):
@@ -93,7 +94,14 @@ class QualityPolicyPayload(BaseModel):
 class ExportCreateRequest(BaseModel):
     """Export dataset version request."""
 
-    export_format: Literal["jsonl", "csv", "parquet", "huggingface"] = "jsonl"
+    export_format: Literal[
+        "jsonl",
+        "csv",
+        "parquet",
+        "huggingface",
+        "rag_vector",
+        "sft_chat",
+    ] = "jsonl"
     exclude_rejected: bool = True
     only_approved: bool = False
     enforce_quality_gate: bool = True

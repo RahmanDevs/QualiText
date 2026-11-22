@@ -15,6 +15,33 @@ async function logout(page: Page) {
   await expect(page.locator('#email')).toBeVisible();
 }
 
+function buildVectorTablePdf(text: string): Buffer {
+  const escaped = text.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  const rects = Array.from({ length: 8 }, (_, i) => `${50 + i * 60} 650 55 20 re S`).join('\n');
+  const stream = `${rects}\nBT /F1 11 Tf 55 655 Td (${escaped}) Tj ET`;
+  const objects = [
+    '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n',
+    '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n',
+    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n',
+    `4 0 obj << /Length ${Buffer.byteLength(stream, 'latin1')} >> stream\n${stream}\nendstream endobj\n`,
+    '5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n',
+  ];
+  const header = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  let pos = Buffer.byteLength(header, 'latin1');
+  for (const obj of objects) {
+    offsets.push(pos);
+    pos += Buffer.byteLength(obj, 'latin1');
+  }
+  const xrefPos = pos;
+  const xrefLines = [`xref\n0 ${objects.length + 1}\n`, '0000000000 65535 f \n'];
+  for (const off of offsets) {
+    xrefLines.push(`${String(off).padStart(10, '0')} 00000 n \n`);
+  }
+  const trailer = `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`;
+  return Buffer.from(header + objects.join('') + xrefLines.join('') + trailer, 'latin1');
+}
+
 test.describe.serial('QualiText Full-Stack E2E Feature Suite', () => {
   test('1. Auth guards, i18n, dark theme, sidebar collapse, and Command Palette', async ({ page }) => {
     await page.goto('/');
@@ -510,5 +537,124 @@ test.describe.serial('QualiText Full-Stack E2E Feature Suite', () => {
     await expect(page.getByText('pii.reveal').first()).toBeVisible();
     await page.getByRole('link', { name: /^Kebijakan$/i }).click();
     await expect(page.locator('#min-dqi')).toHaveValue('60');
+  });
+
+  test('11. Linguistic Quality (B7), VLM PDF Verification (D6), Semantic Chunking + RAG Export, and QA/SFT Synthesis', async ({
+    page,
+  }) => {
+    await loginAs(page, 'admin@qualitext.id', 'Admin123!');
+    await page.getByRole('link', { name: /^Dataset$/i }).click();
+    await expect(page).toHaveURL(/\/datasets$/);
+
+    // 1. Create RAG dataset and upload vector-table PDF
+    await page.fill('#ds-name', 'E2E PDF & RAG Pipeline');
+    await page.selectOption('#ds-type', 'rag');
+    await page.getByRole('button', { name: /Buat Dataset/i }).click();
+    await expect(
+      page.getByRole('heading', { name: 'E2E PDF & RAG Pipeline', exact: true }),
+    ).toBeVisible();
+
+    const pdfCard = page.locator('div.rounded-card', {
+      has: page.getByRole('heading', { name: 'E2E PDF & RAG Pipeline', exact: true }),
+    });
+    const pdfBuf = buildVectorTablePdf(
+      'QualiText adalah platform evaluasi kualitas data korporat dan dokumen tabel terstruktur.',
+    );
+    await pdfCard.locator('input[type="file"]').setInputFiles({
+      name: 'sop_table.pdf',
+      mimeType: 'application/pdf',
+      buffer: pdfBuf,
+    });
+    await expect(page.getByText('Dataset berhasil diunggah dan divalidasi.')).toBeVisible();
+    await expect(pdfCard.getByText(/1 baris/i)).toBeVisible();
+
+    // 2. Open Pipeline NLP/RAG modal
+    await pdfCard.getByRole('button', { name: /Pipeline NLP\/RAG/i }).click();
+    const pipeDialog = page.getByRole('dialog', {
+      name: /Pipeline Lanjutan NLP, VLM & RAG\/SFT/i,
+    });
+    await expect(pipeDialog).toBeVisible();
+
+    // Tab 2: VLM PDF Verification detects table grid mismatch
+    await pipeDialog.getByRole('tab', { name: /Verifikasi VLM PDF/i }).click();
+    await pipeDialog.getByRole('button', { name: /Verifikasi Ekstraksi PDF/i }).click();
+    await expect(pipeDialog.getByText('VLM_TABLE_STRUCTURE_MISMATCH')).toBeVisible();
+    await expect(pipeDialog.getByText(/local_pdf_structural/i)).toBeVisible();
+
+    // Tab 3: Semantic Chunking (v2) + QA/SFT Generator (new_dataset)
+    await pipeDialog.getByRole('tab', { name: /Semantic Chunking & QA\/SFT/i }).click();
+    await pipeDialog.getByRole('button', { name: /Jalankan Semantic Chunking/i }).click();
+    await expect(pipeDialog.getByText(/Terbentuk .* chunk semantik \(v2/i)).toBeVisible();
+
+    await pipeDialog.locator('#qa-target').selectOption('new_dataset');
+    await pipeDialog.getByRole('button', { name: /Buat Pasangan QA\/SFT/i }).click();
+    await expect(
+      pipeDialog.getByText(/Berhasil menghasilkan .* pasangan QA\/SFT \(mode: local_template\)/i),
+    ).toBeVisible();
+
+    // Tab 1: Run custom quality modules including linguistic_quality & vlm_pdf_verifier
+    await pipeDialog.getByRole('tab', { name: /Modul Kualitas/i }).click();
+    await expect(pipeDialog.getByLabel('linguistic_quality')).toBeChecked();
+    await pipeDialog.getByLabel('vlm_pdf_verifier').check();
+    await pipeDialog.getByRole('button', { name: /Jalankan Modul Terpilih/i }).click();
+
+    await expect(page).toHaveURL(/\/runs\?runId=/);
+    await expect(
+      page.getByText(/Kualitas Linguistik — Perplexity & Kosakata \(B7\)/i),
+    ).toBeVisible();
+    await expect(page.getByText(/Verifikasi VLM & Struktur PDF \(D6\)/i)).toBeVisible();
+
+    // 3. Evaluate v2 (semantic chunked) and verify metadata + rag_vector export
+    await page.getByRole('link', { name: /^Dataset$/i }).click();
+    await expect(pdfCard.getByText('v2')).toBeVisible();
+    await pdfCard.getByRole('button', { name: /Jalankan Penilaian/i }).click();
+    await expect(page).toHaveURL(/\/runs\?runId=/);
+    await expect(page.getByText('Data Quality Index (DQI)')).toBeVisible();
+
+    await page.getByRole('link', { name: /^Dataset$/i }).click();
+    await pdfCard.getByRole('button', { name: /Buka Explorer/i }).click();
+    await expect(page).toHaveURL(/\/explorer\?versionId=/);
+    await page.getByText('row_000001').click();
+    await expect(page.getByText(/Metadata Chunk \/ SFT/i)).toBeVisible();
+    await expect(page.getByText(/chunking_strategy:\s*semantic/i)).toBeVisible();
+
+    await page.getByLabel(/Format Ekspor/i).selectOption('rag_vector');
+    const [ragDl] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: /^Ekspor$/i }).click(),
+    ]);
+    const ragText = await fs.readFile((await ragDl.path())!, 'utf-8');
+    const ragRow = JSON.parse(ragText.trim().split('\n')[0]) as {
+      id: string;
+      text: string;
+      metadata: Record<string, unknown>;
+    };
+    expect(ragRow.id).toBe('row_000001');
+    expect(ragRow.text).toContain('QualiText');
+    expect(ragRow.metadata.chunking_strategy).toBe('semantic');
+
+    // 4. Evaluate generated SFT QA dataset and export sft_chat ChatML JSONL
+    await page.getByRole('link', { name: /^Dataset$/i }).click();
+    const qaCard = page.locator('div.rounded-card', {
+      has: page.getByRole('heading', { name: 'E2E PDF & RAG Pipeline (SFT QA)', exact: true }),
+    });
+    await expect(qaCard).toBeVisible();
+    await qaCard.getByRole('button', { name: /Jalankan Penilaian/i }).click();
+    await expect(page).toHaveURL(/\/runs\?runId=/);
+    await expect(page.getByText('Data Quality Index (DQI)')).toBeVisible();
+
+    await page.getByRole('link', { name: /^Dataset$/i }).click();
+    await qaCard.getByRole('button', { name: /Buka Explorer/i }).click();
+    await expect(page).toHaveURL(/\/explorer\?versionId=/);
+    await page.getByLabel(/Format Ekspor/i).selectOption('sft_chat');
+    const [sftDl] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: /^Ekspor$/i }).click(),
+    ]);
+    const sftText = await fs.readFile((await sftDl.path())!, 'utf-8');
+    const sftRow = JSON.parse(sftText.trim().split('\n')[0]) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(sftRow.messages.map((m) => m.role)).toEqual(['system', 'user', 'assistant']);
   });
 });

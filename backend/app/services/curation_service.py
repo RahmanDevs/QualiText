@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import json
 from typing import Any
 
 import polars as pl
@@ -21,6 +22,28 @@ from app.services.dataset_service import (
     load_version_parquet_bytes,
 )
 from app.storage.s3 import get_storage_backend
+
+
+def _sanitize_meta_value(val: Any) -> Any:
+    if isinstance(val, str):
+        return apply_pii_transform(val, mode="mask")
+    if isinstance(val, list):
+        return [_sanitize_meta_value(item) for item in val]
+    if isinstance(val, dict):
+        return {str(k): _sanitize_meta_value(v) for k, v in val.items()}
+    return val
+
+
+def _parse_row_metadata(raw_meta: Any, *, mask_pii: bool) -> dict[str, Any]:
+    if not isinstance(raw_meta, str) or not raw_meta.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_meta)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return _sanitize_meta_value(parsed) if mask_pii else parsed
 
 
 async def list_version_rows(
@@ -83,11 +106,13 @@ async def list_version_rows(
             raw_prompt = str(row.get("prompt") or "")
             raw_response = str(row.get("response") or "")
             raw_text = str(row.get("text") or "")
+            raw_meta = str(row.get("metadata_json") or "")
             row_id_val = str(row["row_id"])
             has_pii = bool(
                 detect_pii_spans(raw_text)
                 or detect_pii_spans(raw_prompt)
                 or detect_pii_spans(raw_response)
+                or (raw_meta and detect_pii_spans(raw_meta))
             )
             disp_prompt = apply_pii_transform(raw_prompt, mode="mask") if has_pii else raw_prompt
             disp_response = (
@@ -111,6 +136,7 @@ async def list_version_rows(
                         validation_error=str(row.get("validation_error") or ""),
                         curation_status=str(row.get("curation_status") or "pending"),
                         has_pii=has_pii,
+                        metadata=_parse_row_metadata(raw_meta, mask_pii=True),
                     )
                 )
         total = len(matched)
@@ -122,8 +148,12 @@ async def list_version_rows(
             prompt = str(row.get("prompt") or "")
             response = str(row.get("response") or "")
             text = str(row.get("text") or "")
+            raw_meta = str(row.get("metadata_json") or "")
             has_pii = bool(
-                detect_pii_spans(text) or detect_pii_spans(prompt) or detect_pii_spans(response)
+                detect_pii_spans(text)
+                or detect_pii_spans(prompt)
+                or detect_pii_spans(response)
+                or (raw_meta and detect_pii_spans(raw_meta))
             )
 
             if has_pii and not should_reveal:
@@ -142,6 +172,7 @@ async def list_version_rows(
                     validation_error=str(row.get("validation_error") or ""),
                     curation_status=str(row.get("curation_status") or "pending"),
                     has_pii=has_pii,
+                    metadata=_parse_row_metadata(raw_meta, mask_pii=not should_reveal),
                 )
             )
 

@@ -338,10 +338,15 @@ async def download_export(
             status_code=status.HTTP_404_NOT_FOUND,
         )
     data = storage.get_bytes(key)
-    ext = "hf.zip" if rec.export_format == "huggingface" else rec.export_format
-    media_type = (
-        "application/zip" if rec.export_format == "huggingface" else "application/octet-stream"
-    )
+    if rec.export_format == "huggingface":
+        ext = "hf.zip"
+        media_type = "application/zip"
+    elif rec.export_format in {"rag_vector", "sft_chat"}:
+        ext = f"{rec.export_format}.jsonl"
+        media_type = "application/jsonl"
+    else:
+        ext = rec.export_format
+        media_type = "application/octet-stream"
     return Response(
         content=data,
         media_type=media_type,
@@ -357,8 +362,6 @@ async def compare_versions(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Compare two immutable dataset versions (Module F4)."""
-    import io
-
     import polars as pl
 
     v1 = await dataset_service.get_version_or_404(db, version_id)

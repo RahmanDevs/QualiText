@@ -440,10 +440,6 @@ def storage_key_from_uri(uri: str) -> str | None:
     return None
 
 
-def _storage_key_from_uri(uri: str) -> str | None:
-    return storage_key_from_uri(uri)
-
-
 async def delete_dataset_and_artifacts(
     db: AsyncSession,
     *,
@@ -469,7 +465,7 @@ async def delete_dataset_and_artifacts(
     keys_to_delete: set[str] = set()
     for ver in versions:
         for uri in (ver.raw_storage_uri, ver.storage_uri):
-            key = _storage_key_from_uri(uri)
+            key = storage_key_from_uri(uri)
             if key:
                 keys_to_delete.add(key)
         keys_to_delete.add(f"datasets/{ds_id}/v{ver.version_number}/raw.{ver.source_format}")
@@ -482,7 +478,7 @@ async def delete_dataset_and_artifacts(
             .all()
         )
         for exp in exports:
-            key = _storage_key_from_uri(exp.storage_uri)
+            key = storage_key_from_uri(exp.storage_uri)
             if key:
                 keys_to_delete.add(key)
 

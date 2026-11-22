@@ -26,6 +26,7 @@ from app.db.models import (
 from app.modules.base import ModuleConfig, ModuleResult, QualityModule
 from app.modules.cleaning.artifacts import ArtifactCleaningModule
 from app.modules.cleaning.language import LanguageDetectionModule
+from app.modules.cleaning.linguistic import LinguisticQualityModule
 from app.modules.cleaning.pii import PiiDetectionModule
 from app.modules.cleaning.toxicity import ToxicityModule
 from app.modules.ingestion.token_analytics import TokenAnalyticsModule
@@ -33,6 +34,7 @@ from app.modules.instruction.complexity_and_format import InstructionComplexityA
 from app.modules.instruction.llm_judge import LlmJudgeModule
 from app.modules.instruction.preference import PreferenceConsistencyModule
 from app.modules.instruction.rag_quality import RagChunkQualityModule
+from app.modules.instruction.vlm_verifier import VlmPdfVerifierModule
 from app.modules.safety.bias import BiasScannerModule
 from app.modules.safety.hallucination_and_injection import HallucinationAndInjectionModule
 from app.modules.semantic.clustering import TopicAndNgramModule
@@ -45,8 +47,10 @@ from app.services.dataset_service import (
     get_dataset_or_404,
     get_version_or_404,
     load_version_parquet_bytes,
+    storage_key_from_uri,
 )
 from app.services.webhook_service import dispatch_workspace_webhooks
+from app.storage.s3 import get_storage_backend
 from app.workers.tasks import publish_run_progress
 
 FINDING_BULK_BATCH_SIZE = 1000
@@ -57,12 +61,14 @@ MODULE_REGISTRY: dict[str, QualityModule] = {
     "artifacts": ArtifactCleaningModule(),
     "pii": PiiDetectionModule(),
     "language": LanguageDetectionModule(),
+    "linguistic_quality": LinguisticQualityModule(),
     "toxicity": ToxicityModule(),
     "dedup_exact_near": ExactAndNearDedupModule(),
     "dedup_semantic": SemanticDedupModule(),
     "topic_ngram": TopicAndNgramModule(),
     "instruction_format": InstructionComplexityAndFormatModule(),
     "llm_judge": LlmJudgeModule(),
+    "vlm_pdf_verifier": VlmPdfVerifierModule(),
     "preference_consistency": PreferenceConsistencyModule(),
     "rag_chunk_quality": RagChunkQualityModule(),
     "bias_scanner": BiasScannerModule(),
@@ -75,12 +81,14 @@ PIPELINE_ORDER = [
     "artifacts",
     "pii",
     "language",
+    "linguistic_quality",
     "toxicity",
     "dedup_exact_near",
     "dedup_semantic",
     "topic_ngram",
     "instruction_format",
     "llm_judge",
+    "vlm_pdf_verifier",
     "bias_scanner",
 ]
 
@@ -169,6 +177,8 @@ async def execute_run_by_id(db: AsyncSession, run_id: str) -> QualityRun:
     dataset_id = dataset.id
     version_id = version.id
     version_number = version.version_number
+    source_format = version.source_format
+    raw_storage_uri = version.raw_storage_uri
 
     ordered_modules = list(run.config_snapshot.get("modules", []))
     params: dict[str, dict[str, Any]] = dict(run.config_snapshot.get("params", {}))
@@ -251,6 +261,12 @@ async def execute_run_by_id(db: AsyncSession, run_id: str) -> QualityRun:
                         str(t) for t in mod_params.get("benchmark_texts", []) if str(t).strip()
                     ]
                     mod_params["benchmark_texts"] = explicit_texts + workspace_benchmark_prompts
+                if mod_name == "vlm_pdf_verifier" and source_format == "pdf":
+                    pdf_key = storage_key_from_uri(raw_storage_uri) or (
+                        f"datasets/{dataset_id}/v{version_number}/raw.pdf"
+                    )
+                    if get_storage_backend().exists(pdf_key):
+                        mod_params["raw_pdf_storage_key"] = pdf_key
 
                 cfg = ModuleConfig(version=mod.version, params=mod_params)
                 mod_res, findings_df = mod.run(lazy_df, cfg, run.seed)

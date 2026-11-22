@@ -138,6 +138,7 @@ Prioritas: **P0** = wajib MVP, **P1** = wajib v1.0, **P2** = pasca v1.0.
 | B4 | Deteksi bahasa per baris dan pelaporan konsistensi korpus (termasuk campur Indonesia–Inggris) | P1 |
 | B5 | Filter kata kasar, ujaran kebencian, toksisitas (leksikon Indonesia/Inggris + model klasifikasi) | P1 |
 | B6 | Pratinjau perubahan (*before/after diff*) sebelum diterapkan | P0 |
+| B7 | Analisis kualitas linguistik: *perplexity* (character LM + hook KenLM/HF), *gibberish*/OCR noise, rasio kata valid vs *out-of-vocabulary (OOV)* | P2 |
 
 #### Modul C — Semantik & Keberagaman
 | ID | Fitur | Prioritas |
@@ -155,7 +156,8 @@ Prioritas: **P0** = wajib MVP, **P1** = wajib v1.0, **P2** = pasca v1.0.
 | D2 | *Response alignment & helpfulness* dengan **LLM-as-a-judge lokal** (model open-source, dapat dikonfigurasi) dan rubrik yang dapat diedit | P1 |
 | D3 | *Formatting compliance*: blok kode tertutup, JSON dalam response valid, ekspektasi format sesuai instruksi | P1 |
 | D4 | Dukungan data preferensi (chosen/rejected) untuk RLHF/DPO: cek konsistensi pasangan | P2 |
-| D5 | Penilaian kualitas *chunk* RAG (panjang, koherensi, kelengkapan konteks) | P2 |
+| D5 | Penilaian kualitas *chunk* RAG (panjang, koherensi, kelengkapan konteks), *semantic chunking* & *metadata enrichment* otomatis | P2 |
+| D6 | Verifikasi VLM & struktural halaman PDF terhadap teks/tabel hasil ekstraksi serta generator pasangan QA/SFT otomatis | P2 |
 
 #### Modul E — Keamanan, Bias, Halusinasi
 | ID | Fitur | Prioritas |
@@ -171,7 +173,7 @@ Prioritas: **P0** = wajib MVP, **P1** = wajib v1.0, **P2** = pasca v1.0.
 | F2 | **Interactive Data Explorer**: grid virtualisasi, filter berdasarkan skor/flag/dimensi, pencarian, penyortiran | P0 |
 | F3 | Kurasi *human-in-the-loop*: tandai (*flag*), setujui, tolak, sunting baris; aksi massal; riwayat per baris | P0 |
 | F4 | **Versi dataset** (immutable) dan perbandingan antar versi | P1 |
-| F5 | **Export pipeline**: JSONL, CSV, Parquet, format Hugging Face Dataset; opsi ekspor hanya baris yang lolos ambang batas | P0 |
+| F5 | **Export pipeline**: JSONL, CSV, Parquet, format Hugging Face Dataset, `rag_vector` JSONL, `sft_chat` ChatML JSONL; opsi ekspor hanya baris yang lolos ambang batas | P0 |
 | F6 | **Laporan kualitas** dapat diunduh (PDF/HTML) untuk audit dan manajemen | P1 |
 | F7 | **Kebijakan kualitas** (*quality gate*): ambang batas DQI/dimensi yang harus dipenuhi sebelum ekspor | P1 |
 | F8 | Pemantauan tren DQI antar versi/waktu | P2 |
@@ -469,7 +471,8 @@ Konvensi: JSON, `snake_case`, paginasi berbasis kursor, kode error terstandar (`
 | `GET /versions/{id}/dedup-preview`, `GET /versions/{id}/topic-clusters`, `GET /versions/{id}/compare/{other_id}` | Pratinjau dedup semantik, klaster 2D, dan perbandingan versi |
 | `POST /curation/diff-preview`, `POST /curation/ai-repair-preview`, `POST /versions/{id}/curation` | Pratinjau diff transformasi, perbaikan teks lokal & aksi kurasi (batch) → versi baru |
 | `GET/PUT /workspaces/{id}/policy` | Kebijakan kualitas |
-| `POST /versions/{id}/exports`, `GET /exports/{id}` | Ekspor dan unduhan |
+| `POST /versions/{id}/exports`, `GET /exports/{id}` | Ekspor (`jsonl`, `csv`, `parquet`, `huggingface`, `rag_vector`, `sft_chat`) dan unduhan |
+| `GET /modules`, `POST /versions/{id}/vlm-verify`, `POST /versions/{id}/semantic-chunk`, `POST /versions/{id}/generate-qa` | Katalog modul kualitas, verifikasi VLM PDF, *semantic chunking* RAG + metadata, dan generator QA/SFT |
 | `GET /audit-logs` | Audit log (izin Governance/Admin) |
 | `POST /api-tokens`, `GET/POST/DELETE /workspaces/{id}/webhooks*`, `GET/POST/DELETE /workspaces/{id}/benchmarks*` | Token API integrasi, manajemen webhook HMAC & set benchmark |
 | `GET /healthz`, `GET /readyz`, `GET /metrics` | Probe liveness/readiness & metrik Prometheus |

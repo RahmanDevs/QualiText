@@ -41,6 +41,7 @@ interface RowItem {
   validation_error: string;
   curation_status: string;
   has_pii: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 interface PaginatedRows {
@@ -60,7 +61,7 @@ type CurationActionType =
   | 'hash_pii'
   | 'drop_row';
 
-type ExportFormat = 'jsonl' | 'csv' | 'parquet' | 'huggingface';
+type ExportFormat = 'jsonl' | 'csv' | 'parquet' | 'huggingface' | 'rag_vector' | 'sft_chat';
 
 export function ExplorerPage() {
   const { accessToken } = useAuthStore();
@@ -197,7 +198,12 @@ export function ExplorerPage() {
       const blob = await dlRes.blob();
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
-      const ext = format === 'huggingface' ? 'hf.zip' : format;
+      const ext =
+        format === 'huggingface'
+          ? 'hf.zip'
+          : format === 'rag_vector' || format === 'sft_chat'
+            ? `${format}.jsonl`
+            : format;
       anchor.href = url;
       anchor.download = `qualitext_export.${ext}`;
       document.body.appendChild(anchor);
@@ -499,6 +505,8 @@ export function ExplorerPage() {
             <option value="csv">CSV</option>
             <option value="parquet">Parquet</option>
             <option value="huggingface">Hugging Face (.zip)</option>
+            <option value="rag_vector">{t('explorer.exportRagVector')}</option>
+            <option value="sft_chat">{t('explorer.exportSftChat')}</option>
           </select>
           <Button
             variant="secondary"
@@ -778,6 +786,21 @@ export function ExplorerPage() {
           <div className="rounded-control border border-border bg-canvas p-3">
             <HighlightedText text={activeRow.text || activeRow.prompt} />
           </div>
+
+          {activeRow.metadata && Object.keys(activeRow.metadata).length > 0 && (
+            <div className="space-y-1.5 rounded-control border border-border bg-subtle p-3">
+              <p className="text-xs font-medium text-text-secondary">
+                {t('explorer.metadataTitle')}
+              </p>
+              <div className="flex flex-wrap gap-2 text-xs">
+                {Object.entries(activeRow.metadata).map(([k, v]) => (
+                  <Badge key={k} tone="neutral">
+                    {k}: {Array.isArray(v) ? v.join(', ') : String(v)}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
 
           {diffResult && (
             <DiffViewer

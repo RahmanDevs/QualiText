@@ -21,8 +21,7 @@ def deterministic_pdf_repair(text: str) -> str:
     repaired = _HYPHEN_BREAK_RE.sub(r"\1\2", repaired)
     repaired = _SINGLE_NEWLINE_RE.sub(" ", repaired)
     repaired = clean_text_artifacts(repaired)
-    repaired = _MULTI_SPACE_RE.sub(" ", repaired).strip()
-    return repaired
+    return _MULTI_SPACE_RE.sub(" ", repaired).strip()
 
 
 def _prepare_llm_request(

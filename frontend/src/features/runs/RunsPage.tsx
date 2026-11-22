@@ -189,6 +189,8 @@ export function RunsPage() {
   }
 
   const tokenMod = data?.module_results.find((m) => m.module === 'token_analytics');
+  const linguisticMod = data?.module_results.find((m) => m.module === 'linguistic_quality');
+  const vlmMod = data?.module_results.find((m) => m.module === 'vlm_pdf_verifier');
   const hasHistogram = Boolean(tokenMod && 'hist_0_128' in tokenMod.metrics);
   const maxBucketVal = hasHistogram
     ? Math.max(1, ...TOKEN_HISTOGRAM_BUCKETS.map((b) => tokenMod!.metrics[b.key] ?? 0))
@@ -313,6 +315,102 @@ export function RunsPage() {
                   );
                 })}
               </div>
+            </Card>
+          )}
+
+          {linguisticMod && (
+            <Card className="space-y-3 p-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-text-primary">
+                  {t('runs.linguisticCardTitle')}
+                </h2>
+                <Badge tone="info">
+                  {t('runs.findingsCount', {
+                    count: formatNumber(linguisticMod.findings_count, locale),
+                  })}
+                </Badge>
+              </div>
+              <dl className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-5">
+                <div>
+                  <dt className="text-text-muted">{t('runs.avgPerplexity')}</dt>
+                  <dd className="font-mono font-semibold tabular-nums text-text-primary">
+                    {linguisticMod.metrics.avg_perplexity ?? 0}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-text-muted">{t('runs.p95Perplexity')}</dt>
+                  <dd className="font-mono font-semibold tabular-nums text-text-primary">
+                    {linguisticMod.metrics.p95_perplexity ?? 0}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-text-muted">{t('runs.validWordRatio')}</dt>
+                  <dd className="font-mono font-semibold tabular-nums text-success-600">
+                    {Math.round((linguisticMod.metrics.valid_word_ratio ?? 1) * 100)}%
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-text-muted">{t('runs.oovRatio')}</dt>
+                  <dd className="font-mono font-semibold tabular-nums text-warning-600">
+                    {Math.round((linguisticMod.metrics.oov_ratio ?? 0) * 100)}%
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-text-muted">{t('runs.gibberishRows')}</dt>
+                  <dd className="font-mono font-semibold tabular-nums text-text-primary">
+                    {linguisticMod.metrics.gibberish_rows ?? 0}
+                  </dd>
+                </div>
+              </dl>
+              <div className="h-2.5 w-full overflow-hidden rounded-full bg-subtle">
+                <div
+                  className="h-full rounded-full bg-success-600"
+                  style={{
+                    width: `${Math.min(100, Math.round((linguisticMod.metrics.valid_word_ratio ?? 1) * 100))}%`,
+                  }}
+                />
+              </div>
+            </Card>
+          )}
+
+          {vlmMod && (
+            <Card className="space-y-3 p-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-text-primary">
+                  {t('runs.vlmCardTitle')}
+                </h2>
+                <Badge tone="info">
+                  {t('runs.findingsCount', {
+                    count: formatNumber(vlmMod.findings_count, locale),
+                  })}
+                </Badge>
+              </div>
+              <dl className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+                <div>
+                  <dt className="text-text-muted">{t('runs.vlmPagesVerified')}</dt>
+                  <dd className="font-mono font-semibold tabular-nums text-text-primary">
+                    {vlmMod.metrics.verified_pages ?? 0} / {vlmMod.metrics.total_pages ?? 0}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-text-muted">{t('runs.vlmAvgAccuracy')}</dt>
+                  <dd className="font-mono font-semibold tabular-nums text-success-600">
+                    {Math.round((vlmMod.metrics.avg_vlm_accuracy_score ?? 1) * 100)}%
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-text-muted">{t('runs.vlmTableFidelity')}</dt>
+                  <dd className="font-mono font-semibold tabular-nums text-info-600">
+                    {Math.round((vlmMod.metrics.avg_table_fidelity_score ?? 1) * 100)}%
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-text-muted">{t('runs.vlmFlaggedPages')}</dt>
+                  <dd className="font-mono font-semibold tabular-nums text-danger-600">
+                    {vlmMod.metrics.flagged_pages ?? 0}
+                  </dd>
+                </div>
+              </dl>
             </Card>
           )}
 

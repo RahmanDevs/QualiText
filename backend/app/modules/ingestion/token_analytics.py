@@ -21,16 +21,16 @@ def estimate_token_count(text: str) -> int:
     return max(1, math.ceil(units * 1.25))
 
 
-def _resolve_token_counter(tokenizer: str) -> tuple[Callable[[str], int], str]:
+def _resolve_token_counter(tokenizer: str) -> Callable[[str], int]:
     """Resolve optional `tiktoken:<enc>` or `hf:<model>` counter with heuristic fallback."""
     if tokenizer.startswith("tiktoken:"):
         enc_name = tokenizer.split(":", 1)[1].strip() or "cl100k_base"
         try:
             tiktoken_mod = importlib.import_module("tiktoken")
             encoder = tiktoken_mod.get_encoding(enc_name)
-            return (lambda t: len(encoder.encode(t)) if t else 0), tokenizer
+            return lambda t: len(encoder.encode(t)) if t else 0
         except Exception:
-            return estimate_token_count, "heuristic"
+            return estimate_token_count
 
     if tokenizer.startswith("hf:"):
         model_id = tokenizer.split(":", 1)[1].strip()
@@ -38,11 +38,11 @@ def _resolve_token_counter(tokenizer: str) -> tuple[Callable[[str], int], str]:
             try:
                 tok_mod = importlib.import_module("tokenizers")
                 hf_tok = tok_mod.Tokenizer.from_pretrained(model_id)
-                return (lambda t: len(hf_tok.encode(t).ids) if t else 0), tokenizer
+                return lambda t: len(hf_tok.encode(t).ids) if t else 0
             except Exception:
-                return estimate_token_count, "heuristic"
+                return estimate_token_count
 
-    return estimate_token_count, "heuristic"
+    return estimate_token_count
 
 
 def _percentile(sorted_vals: list[int], pct: float) -> float:
@@ -68,7 +68,7 @@ class TokenAnalyticsModule:
         del seed  # Deterministic without randomness
         max_tokens = int(config.params.get("max_tokens", 4096))
         tokenizer_pref = str(config.params.get("tokenizer", "heuristic"))
-        counter_fn, _resolved_name = _resolve_token_counter(tokenizer_pref)
+        counter_fn = _resolve_token_counter(tokenizer_pref)
 
         total_rows = 0
         token_counts: list[int] = []

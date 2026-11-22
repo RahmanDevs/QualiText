@@ -14,7 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.db.models import ExportRecord, QualityPolicy, QualityRun
+from app.modules.cleaning.language import detect_language
 from app.modules.cleaning.pii import detect_pii_spans
+from app.modules.ingestion.semantic_chunker import extract_metadata_keywords
+from app.modules.ingestion.token_analytics import estimate_token_count
 from app.services.audit_service import record_audit_log
 from app.services.dataset_service import (
     get_dataset_or_404,
@@ -72,7 +75,15 @@ async def create_export(
         if block_pii:
             pii_check_cols = [
                 c
-                for c in ("row_id", "prompt", "response", "text", "chosen", "rejected")
+                for c in (
+                    "row_id",
+                    "prompt",
+                    "response",
+                    "text",
+                    "chosen",
+                    "rejected",
+                    "metadata_json",
+                )
                 if c in df.columns
             ]
             for row in df.select(pii_check_cols).iter_rows(named=True):
@@ -180,6 +191,71 @@ async def create_export(
     if export_format == "jsonl":
         lines = [json.dumps(r, ensure_ascii=False) for r in out_df.iter_rows(named=True)]
         payload_bytes = ("\n".join(lines) + ("\n" if lines else "")).encode("utf-8")
+    elif export_format == "rag_vector":
+        rag_lines: list[str] = []
+        for row in df.iter_rows(named=True):
+            row_text = str(row.get("text") or "")
+            meta_out: dict[str, Any] = {}
+            raw_meta = row.get("metadata_json")
+            if isinstance(raw_meta, str) and raw_meta.strip():
+                try:
+                    parsed = json.loads(raw_meta)
+                    if isinstance(parsed, dict):
+                        meta_out = dict(parsed)
+                except json.JSONDecodeError:
+                    meta_out = {}
+            if not meta_out:
+                meta_out = {
+                    "language": detect_language(row_text),
+                    "token_count": estimate_token_count(row_text),
+                    "keywords": extract_metadata_keywords(row_text, top_k=5),
+                    "line_number": row.get("line_number"),
+                }
+            meta_out["dataset_id"] = ds.id
+            meta_out["version_number"] = ver.version_number
+            meta_out["curation_status"] = str(row.get("curation_status") or "pending")
+            rag_lines.append(
+                json.dumps(
+                    {
+                        "id": str(row["row_id"]),
+                        "text": row_text,
+                        "metadata": meta_out,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        payload_bytes = ("\n".join(rag_lines) + ("\n" if rag_lines else "")).encode("utf-8")
+    elif export_format == "sft_chat":
+        chat_lines: list[str] = []
+        for row in df.iter_rows(named=True):
+            msgs: list[dict[str, str]] = []
+            raw_msgs = row.get("messages_json")
+            if isinstance(raw_msgs, str) and raw_msgs.strip():
+                try:
+                    parsed_msgs = json.loads(raw_msgs)
+                    if isinstance(parsed_msgs, list):
+                        msgs = [
+                            {"role": str(m["role"]), "content": str(m["content"])}
+                            for m in parsed_msgs
+                            if isinstance(m, dict) and m.get("role") and m.get("content")
+                        ]
+                except json.JSONDecodeError:
+                    msgs = []
+            if not msgs:
+                p_val = str(row.get("prompt") or "").strip()
+                r_val = str(row.get("response") or "").strip()
+                t_val = str(row.get("text") or "").strip()
+                if p_val and r_val:
+                    msgs = [
+                        {"role": "user", "content": p_val},
+                        {"role": "assistant", "content": r_val},
+                    ]
+                elif p_val:
+                    msgs = [{"role": "user", "content": p_val}]
+                elif t_val:
+                    msgs = [{"role": "user", "content": t_val}]
+            chat_lines.append(json.dumps({"messages": msgs}, ensure_ascii=False))
+        payload_bytes = ("\n".join(chat_lines) + ("\n" if chat_lines else "")).encode("utf-8")
     elif export_format == "csv":
         payload_bytes = out_df.write_csv().encode("utf-8")
     elif export_format == "parquet":
@@ -187,11 +263,19 @@ async def create_export(
         out_df.write_parquet(buf)
         payload_bytes = buf.getvalue()
     elif export_format == "huggingface":
+        hf_cols = [c for c in export_cols if c in df.columns]
+        for extra_col in ("messages_json", "metadata_json"):
+            if extra_col in df.columns:
+                non_empty = df.filter(pl.col(extra_col).cast(pl.Utf8).str.len_chars() > 0).height
+                if non_empty > 0:
+                    hf_cols.append(extra_col)
+        hf_df = df.select(hf_cols)
+
         pq_buf = io.BytesIO()
-        out_df.write_parquet(pq_buf)
+        hf_df.write_parquet(pq_buf)
         pq_bytes = pq_buf.getvalue()
 
-        features = {col: {"dtype": "string", "_type": "Value"} for col in out_df.columns}
+        features = {col: {"dtype": "string", "_type": "Value"} for col in hf_df.columns}
         dataset_info = {
             "dataset_name": ds.name,
             "description": ds.description,
@@ -199,7 +283,7 @@ async def create_export(
             "splits": {
                 "train": {
                     "name": "train",
-                    "num_examples": out_df.height,
+                    "num_examples": hf_df.height,
                     "num_bytes": len(pq_bytes),
                 }
             },
@@ -214,7 +298,7 @@ async def create_export(
             "---\n\n"
             f"# {ds.name}\n\n"
             f"Diekspor dari QualiText (v{ver.version_number}, "
-            f"DQI: {manifest['dqi_total']}, baris: {out_df.height}).\n"
+            f"DQI: {manifest['dqi_total']}, baris: {hf_df.height}).\n"
         )
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -232,7 +316,12 @@ async def create_export(
 
     storage = get_storage_backend()
     ts_tag = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    ext = "hf.zip" if export_format == "huggingface" else export_format
+    if export_format == "huggingface":
+        ext = "hf.zip"
+    elif export_format in {"rag_vector", "sft_chat"}:
+        ext = f"{export_format}.jsonl"
+    else:
+        ext = export_format
     exp_key = f"exports/{ds.id}/v{ver.version_number}/export_{ts_tag}_{uuid.uuid4().hex[:8]}.{ext}"
     storage_uri = storage.put_bytes(exp_key, payload_bytes)
     storage.put_bytes(f"{exp_key}.manifest.json", json.dumps(manifest, indent=2).encode("utf-8"))

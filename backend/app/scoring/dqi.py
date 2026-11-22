@@ -62,6 +62,8 @@ def _extract_dimension_score(dim: str, results: list[ModuleResult]) -> float:
                 scores.append(max(0.0, min(100.0, m["artifact_clean_ratio"] * 100.0)))
             elif "lang_consistency_ratio" in m:
                 scores.append(max(0.0, min(100.0, m["lang_consistency_ratio"] * 100.0)))
+            elif "linguistic_quality_ratio" in m:
+                scores.append(max(0.0, min(100.0, m["linguistic_quality_ratio"] * 100.0)))
         elif dim == "uniqueness_diversity":
             if "unique_ratio" in m:
                 scores.append(max(0.0, min(100.0, m["unique_ratio"] * 100.0)))
@@ -72,6 +74,7 @@ def _extract_dimension_score(dim: str, results: list[ModuleResult]) -> float:
             for key in (
                 "preference_consistency_ratio",
                 "rag_chunk_quality_score",
+                "vlm_verification_score",
                 "format_compliance_ratio",
                 "avg_judge_score",
             ):

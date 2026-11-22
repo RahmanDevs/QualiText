@@ -24,7 +24,7 @@ export default defineConfig({
     : [
         {
           command:
-            "cd ../backend && DATABASE_URL=sqlite+aiosqlite:////tmp/qualitext_e2e.db LOCAL_STORAGE_PATH=/tmp/qualitext_e2e_storage CELERY_TASK_ALWAYS_EAGER=true CORS_ORIGINS='[\"http://127.0.0.1:5173\",\"http://localhost:5173\"]' .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001",
+            "cd ../backend && DATABASE_URL=sqlite+aiosqlite:////tmp/qualitext_e2e.db LOCAL_STORAGE_PATH=/tmp/qualitext_e2e_storage CELERY_TASK_ALWAYS_EAGER=true CORS_ORIGINS='[\"http://127.0.0.1:5173\",\"http://localhost:5173\"]' PYTHONPATH=. .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001",
           url: 'http://127.0.0.1:8001/healthz',
           reuseExistingServer: false,
           timeout: 30_000,
