@@ -4,7 +4,7 @@ const useExternalServer = Boolean(process.env.E2E_BASE_URL);
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: '**/*.e2e.spec.ts',
+  testMatch: ['**/*.e2e.spec.ts', '**/*.a11y.spec.mjs'],
   workers: 1,
   fullyParallel: false,
   timeout: 60_000,
@@ -24,7 +24,7 @@ export default defineConfig({
     : [
         {
           command:
-            "cd ../backend && DATABASE_URL=sqlite+aiosqlite:////tmp/qualitext_e2e.db LOCAL_STORAGE_PATH=/tmp/qualitext_e2e_storage CELERY_TASK_ALWAYS_EAGER=true CORS_ORIGINS='[\"http://127.0.0.1:5173\",\"http://localhost:5173\"]' PYTHONPATH=. .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001",
+            "cd ../backend && DATABASE_URL=sqlite+aiosqlite:////tmp/qualitext_e2e.db LOCAL_STORAGE_PATH=/tmp/qualitext_e2e_storage CELERY_TASK_ALWAYS_EAGER=true CORS_ORIGINS='[\"http://127.0.0.1:5173\",\"http://localhost:5173\"]' PYTHONPATH=. sh -c 'if [ -x .venv/bin/python ]; then exec .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001; else exec uv run python -m uvicorn app.main:app --host 127.0.0.1 --port 8001; fi'",
           url: 'http://127.0.0.1:8001/healthz',
           reuseExistingServer: false,
           timeout: 30_000,

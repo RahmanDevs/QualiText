@@ -119,11 +119,9 @@ export function DqiTrendChart({ points, title, emptyLabel }: DqiTrendChartProps)
             fill="var(--brand-600)"
             stroke="var(--bg-surface)"
             strokeWidth="1.5"
-            tabIndex={0}
-            className="cursor-pointer outline-none"
-            aria-label={`v${c.pt.version_number}: ${c.pt.dqi_total}`}
+            className="cursor-pointer"
+            onClick={() => setActiveIdx(idx)}
             onMouseEnter={() => setActiveIdx(idx)}
-            onFocus={() => setActiveIdx(idx)}
           />
         ))}
       </svg>

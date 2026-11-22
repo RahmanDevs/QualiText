@@ -100,11 +100,8 @@ export function ClusterScatterChart({ clusters, points, entropy }: ClusterScatte
                   fillOpacity={0.85}
                   stroke={isSelected ? 'var(--text-primary)' : 'var(--bg-surface)'}
                   strokeWidth={isSelected ? 2 : 1}
-                  tabIndex={0}
-                  className="cursor-pointer outline-none"
-                  aria-label={`${pt.row_id} (cluster ${pt.cluster_id})`}
+                  className="cursor-pointer"
                   onClick={() => setSelectedPoint(pt)}
-                  onFocus={() => setSelectedPoint(pt)}
                 />
               );
             })}

@@ -3,7 +3,7 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
+const BASE_URL = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:5173';
 
 test('login flow, main workspace navigation, and WCAG 2.1 AA accessibility check', async ({
   page,
@@ -19,6 +19,7 @@ test('login flow, main workspace navigation, and WCAG 2.1 AA accessibility check
   await page.getByRole('button', { name: /Masuk|Sign In/i }).click();
 
   await expect(page.getByRole('heading', { name: /Ringkasan|Overview/i })).toBeVisible();
+  await page.waitForLoadState('networkidle');
   const dashboardAxe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
   expect(dashboardAxe.violations).toEqual([]);
 });

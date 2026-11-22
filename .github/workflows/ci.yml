@@ -87,13 +87,24 @@ jobs:
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+      - name: Install Backend Dependencies & Seed E2E Database
+        working-directory: backend
+        run: |
+          uv sync --all-extras --frozen
+          rm -rf /tmp/qualitext_e2e.db /tmp/qualitext_e2e_storage
+          DATABASE_URL=sqlite+aiosqlite:////tmp/qualitext_e2e.db PYTHONPATH=. .venv/bin/python -m alembic upgrade head
+          DATABASE_URL=sqlite+aiosqlite:////tmp/qualitext_e2e.db LOCAL_STORAGE_PATH=/tmp/qualitext_e2e_storage PYTHONPATH=. .venv/bin/python -m scripts.seed
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
       - name: Install Playwright & Axe Accessibility Scanner
         working-directory: frontend
         run: |
           npm ci
           npx playwright install --with-deps chromium
-          npm install --no-save @playwright/test @axe-core/playwright
           npx playwright test e2e/smoke.a11y.spec.mjs
